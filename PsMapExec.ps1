@@ -99,7 +99,7 @@ Write-Output $Banner
 Write-Host "Github  : "  -NoNewline
 Write-Host "https://github.com/The-Viper-One"
 Write-Host "Version : " -NoNewline
-Write-Host "0.3.9"
+Write-Host "0.4.0"
 Write-Host
 
 # If no targets have been provided
