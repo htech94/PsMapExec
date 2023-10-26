@@ -128,20 +128,26 @@ if ($Method -eq ""  -and !$SessionHunter -and !$Spray){
 }
 
 
-
-
-if ($Method -eq "RDP" -and $Hash -ne ""){
+if ($Method -eq "RDP") {
+    if ($Hash -ne "") {
         Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Hash authentication not currently supported with RDP"
         return
-}
-
-if ($CurrentUser -and $Method -eq "RDP"){
-
+    }
+    
+    if ($Ticket -ne "") {
+        Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
+        Write-Host "Ticket authentication not currently supported with RDP"
+        return
+    }
+    
+    if ($CurrentUser -or $Username -eq "" -or $Password -eq "") {
         Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "-Username and -Password parameters required when using the method RDP"
         return
+    }
 }
+
 
     if ($CurrentUser) {
         if ($Hash -ne "" -or $Password -ne "" -or $Username -ne "" -or $Ticket -ne "") {
@@ -1275,7 +1281,7 @@ function Display-ComputerStatus {
      # Attempt to resolve the IP address
         $IP = $null
         $Ping = New-Object System.Net.NetworkInformation.Ping 
-        $Result = $Ping.Send($ComputerName, 10)
+        $Result = $Ping.Send($ComputerName, 15)
 
         if ($Result.Status -eq 'Success') {
             $IP = $Result.Address.IPAddressToString
@@ -1620,7 +1626,7 @@ function Display-ComputerStatus {
           # Attempt to resolve the IP address
         $IP = $null
         $Ping = New-Object System.Net.NetworkInformation.Ping 
-        $Result = $Ping.Send($ComputerName, 10)
+        $Result = $Ping.Send($ComputerName, 15)
 
         if ($Result.Status -eq 'Success') {
             $IP = $Result.Address.IPAddressToString
@@ -1817,7 +1823,7 @@ function Display-ComputerStatus {
           # Attempt to resolve the IP address
         $IP = $null
         $Ping = New-Object System.Net.NetworkInformation.Ping 
-        $Result = $Ping.Send($ComputerName, 10)
+        $Result = $Ping.Send($ComputerName, 15)
 
         if ($Result.Status -eq 'Success') {
             $IP = $Result.Address.IPAddressToString
@@ -1963,7 +1969,7 @@ $MaxConcurrentJobs = $Threads
 $RDPJobs = @()
 
 # Setting up runspaces for Port Checking
-$runspacePool = [runspacefactory]::CreateRunspacePool(1, $Threads)
+$runspacePool = [runspacefactory]::CreateRunspacePool(1, 4) # Need to test the threads at scale more
 $runspacePool.Open()
 $runspaces = New-Object System.Collections.ArrayList
 
@@ -1986,8 +1992,8 @@ $RunSpaceScriptBlock = {
     }
 
     $tcpClient.Close()
-    if (!$connected) { return "Unable to connect" }
-    elseif ($Connected) { return "Connected" }
+    if ($connected) { return "Connected" }
+    else { return "Unable to connect" }
 }
 
 foreach ($computer in $computers) {
@@ -2087,7 +2093,7 @@ function Display-ComputerStatus {
     # Resolve IP
     $IP = $null
     $Ping = New-Object System.Net.NetworkInformation.Ping 
-    $Result = $Ping.Send($ComputerName, 10)
+    $Result = $Ping.Send($ComputerName, 15)
     if ($Result.Status -eq 'Success') {
     $IP = $Result.Address.IPAddressToString
     Write-Host ("{0,-16}" -f $IP) -NoNewline
@@ -3057,7 +3063,7 @@ function Display-ComputerStatus {
           # Attempt to resolve the IP address
         $IP = $null
         $Ping = New-Object System.Net.NetworkInformation.Ping 
-        $Result = $Ping.Send($ComputerName, 10)
+        $Result = $Ping.Send($ComputerName, 15)
 
         if ($Result.Status -eq 'Success') {
             $IP = $Result.Address.IPAddressToString
@@ -3357,7 +3363,7 @@ function Display-ComputerStatus {
           # Attempt to resolve the IP address
         $IP = $null
         $Ping = New-Object System.Net.NetworkInformation.Ping 
-        $Result = $Ping.Send($ComputerName, 10)
+        $Result = $Ping.Send($ComputerName, 15)
 
         if ($Result.Status -eq 'Success') {
             $IP = $Result.Address.IPAddressToString
@@ -3840,7 +3846,7 @@ function Display-ComputerStatus {
           # Attempt to resolve the IP address
         $IP = $null
         $Ping = New-Object System.Net.NetworkInformation.Ping 
-        $Result = $Ping.Send($ComputerName, 10)
+        $Result = $Ping.Send($ComputerName, 15)
 
         if ($Result.Status -eq 'Success') {
             $IP = $Result.Address.IPAddressToString
