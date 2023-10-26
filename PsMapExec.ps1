@@ -2109,9 +2109,10 @@ if ($Password -ne ""){$result = Invoke-SharpRDP -Command "username=$Domain\$User
            
             $result = $result.Trim()
 
-            $SuccessStatus = @('Success', 'STATUS_PASSWORD_MUST_CHANGE', 'STATUS_ACCOUNT_RESTRICTION', 'LOGON_FAILED_UPDATE_PASSWORD', 'ARBITRATION_CODE_BUMP_OPTIONS', 'ARBITRATION_CODE_CONTINUE_LOGON', 'ARBITRATION_CODE_CONTINUE_TERMINATE', 'ARBITRATION_CODE_NOPERM_DIALOG', 'ARBITRATION_CODE_REFUSED_DIALOG', 'ARBITRATION_CODE_RECONN_OPTIONS')
+            $SuccessStatus = @('Success', 'STATUS_PASSWORD_MUST_CHANGE', 'LOGON_FAILED_UPDATE_PASSWORD', 'ARBITRATION_CODE_BUMP_OPTIONS', 'ARBITRATION_CODE_CONTINUE_LOGON', 'ARBITRATION_CODE_CONTINUE_TERMINATE', 'ARBITRATION_CODE_NOPERM_DIALOG', 'ARBITRATION_CODE_REFUSED_DIALOG', 'ARBITRATION_CODE_RECONN_OPTIONS')
             $DeniedStatus = @('ERROR_CODE_ACCESS_DENIED', 'LOGON_FAILED_BAD_PASSWORD', 'LOGON_FAILED_OTHER', 'LOGON_WARNING', 'STATUS_LOGON_FAILURE', 'SSL_ERR_LOGON_FAILURE', 'disconnectReasonByServer', 'disconnectReasonRemoteByUser')
             $PwChangeStatus = @('SSL_ERR_PASSWORD_MUST_CHANGE')
+            $ToDStatus = @('STATUS_ACCOUNT_RESTRICTION')
 
 switch ($result) {
     "Unable to connect" {continue}
@@ -2130,6 +2131,11 @@ switch ($result) {
     { $PwChangeStatus -contains $_ } {
         if ($SuccessOnly){continue}
         Display-ComputerStatus -ComputerName $ComputerName -OS $OS -statusColor "Magenta" -statusSymbol "[/] " -statusText "PASSWORD CHANGE REQUIRED" -NameLength $NameLength -OSLength $OSLength
+        continue
+    }
+
+    { $ToDStatus -contains $_ } {
+        Display-ComputerStatus -ComputerName $ComputerName -OS $OS -statusColor "Green" -statusSymbol "[+] " -statusText "SUCCESS - ACCOUNT RESTRICTION" -NameLength $NameLength -OSLength $OSLength
         continue
     }
 
