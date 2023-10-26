@@ -2122,19 +2122,19 @@ switch ($result) {
     }
 
     { $DeniedStatus -contains $_ } {
-        if ($SuccessOnlyl){Continue}
+        if ($SuccessOnly){Continue}
         Display-ComputerStatus -ComputerName $ComputerName -OS $OS -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NameLength $NameLength -OSLength $OSLength
         continue
     }
     
     { $PwChangeStatus -contains $_ } {
-        if ($SuccessOnlyl){continue}
+        if ($SuccessOnly){continue}
         Display-ComputerStatus -ComputerName $ComputerName -OS $OS -statusColor "Magenta" -statusSymbol "[/] " -statusText "PASSWORD CHANGE REQUIRED" -NameLength $NameLength -OSLength $OSLength
         continue
     }
 
     default {
-        if ($SuccessOnlyl){continue}
+        if ($SuccessOnly){continue}
         Display-ComputerStatus -ComputerName $ComputerName -OS $OS -statusColor "Yellow" -statusSymbol "[*] " -statusText "$_" -NameLength $NameLength -OSLength $OSLength
         continue
     }
