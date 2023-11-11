@@ -5200,11 +5200,14 @@ function Parse-KerbDump {
 ################################################################################################################
 
 Function Parse-NTDS {
-    [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
         [string]$DirectoryPath
     )
+
+    if ([string]::IsNullOrEmpty($DirectoryPath)) {
+        Write-Host "Directory path is not specified or is empty." -ForegroundColor Red
+        return
+    }
 
     if (-not (Test-Path -Path $DirectoryPath)) {
         Write-Host "Directory at path '$DirectoryPath' does not exist." -ForegroundColor Red
@@ -5212,20 +5215,9 @@ Function Parse-NTDS {
     }
 
     $currentTime = Get-Date -Format "yyyyMMddHHmmss"
-
     Get-ChildItem -Path $DirectoryPath -Filter "*-NTDS.txt" -File | ForEach-Object {
-        ProcessNTDSFile $_ $DirectoryPath $currentTime
-    }
-
-    Function ProcessNTDSFile {
-        param (
-            $File,
-            $DirectoryPath,
-            $currentTime
-        )
-
-        $NTDSFile = $File.FullName
-        $computerName = [IO.Path]::GetFileNameWithoutExtension($File.Name) -replace "-NTDS", ""
+        $NTDSFile = $_.FullName
+        $computerName = [IO.Path]::GetFileNameWithoutExtension($_.Name) -replace "-NTDS", ""
         $newDirectoryName = "${computerName}-${currentTime}"
         $newDirectoryPath = Join-Path $DirectoryPath $newDirectoryName
 
@@ -5233,68 +5225,47 @@ Function Parse-NTDS {
             New-Item -Path $newDirectoryPath -ItemType "Directory" | Out-Null
         }
 
-        $userHashes = New-Object System.Collections.ArrayList
-        $computerHashes = New-Object System.Collections.ArrayList
+        $userHashes = @()
+        $computerHashes = @()
         $identicalPasswordGroups = @{}
-        $emptyPasswordUsers = New-Object System.Collections.ArrayList
-        $samHashes = New-Object System.Collections.ArrayList
+        $emptyPasswordUsers = @()
+        $samHashes = @()
 
         $prevLine = ""
         Get-Content $NTDSFile | ForEach-Object {
-            ProcessNTDSLine $_ $prevLine $userHashes $computerHashes $identicalPasswordGroups $emptyPasswordUsers $samHashes
-            $prevLine = $_
+            $line = $_
+            $parts = $line -split ':'
+            $user = $parts[0]
+            $hash = $parts[3]
+
+            if ($hash -eq '31d6cfe0d16ae931b73c59d7e0c089c0') {
+                $emptyPasswordUsers += $user
+            }
+
+            if ($user -like "*$*") {
+                $computerHashes += $line
+            } else {
+                $userHashes += $line
+
+                if ($hash -ne $null) {
+                    if (-not $identicalPasswordGroups.ContainsKey($hash)) {
+                        $identicalPasswordGroups[$hash] = @()
+                    }
+                    $identicalPasswordGroups[$hash] += $user
+                }
+
+                # Check if the previous line and the current line do not have two "::" in a row
+                if (-not ($line -match ':::' -and $prevLine -match ':::')) {
+                    $samHashes += $line
+                }
+            }
+
+            $prevLine = $line
         }
 
         $userHashes | Set-Content -Path (Join-Path $newDirectoryPath "UserHashes.txt")
         $computerHashes | Set-Content -Path (Join-Path $newDirectoryPath "ComputerHashes.txt")
         $emptyPasswordUsers | Set-Content -Path (Join-Path $newDirectoryPath "UsersWithEmptyPasswords.txt")
-
-        WriteIdenticalPasswordGroups $identicalPasswordGroups $newDirectoryPath
-
-        Move-Item -Path $NTDSFile -Destination (Join-Path $newDirectoryPath ".$computerName-NTDS-Full.txt") -Force
-        $samHashes | Set-Content -Path (Join-Path $newDirectoryPath "SAMHashes.txt")
-    }
-
-    Function ProcessNTDSLine {
-        param (
-            $line,
-            $prevLine,
-            $userHashes,
-            $computerHashes,
-            $identicalPasswordGroups,
-            $emptyPasswordUsers,
-            $samHashes
-        )
-
-        $parts = $line -split ':'
-        $user = $parts[0]
-        $hash = $parts[3]
-
-        if ($hash -eq '31d6cfe0d16ae931b73c59d7e0c089c0') {
-            [void]$emptyPasswordUsers.Add($user)
-        }
-
-        if ($user -like "*$*") {
-            [void]$computerHashes.Add($line)
-        } else {
-            [void]$userHashes.Add($line)
-
-            if (-not $identicalPasswordGroups.ContainsKey($hash)) {
-                $identicalPasswordGroups[$hash] = New-Object System.Collections.ArrayList
-            }
-            [void]$identicalPasswordGroups[$hash].Add($user)
-
-            if (-not ($line -match ':::' -and $prevLine -match ':::')) {
-                [void]$samHashes.Add($line)
-            }
-        }
-    }
-
-    Function WriteIdenticalPasswordGroups {
-        param (
-            $identicalPasswordGroups,
-            $newDirectoryPath
-        )
 
         $groupNumber = 1
         $groupedUsersContent = foreach ($group in $identicalPasswordGroups.GetEnumerator()) {
@@ -5307,8 +5278,16 @@ Function Parse-NTDS {
         }
 
         $groupedUsersContent | Set-Content -Path (Join-Path $newDirectoryPath "GroupedUsersWithIdenticalPasswords.txt")
+
+        $newFileName = ".$computerName-NTDS-Full.txt"
+        Move-Item -Path $NTDSFile -Destination (Join-Path $newDirectoryPath $newFileName) -Force
+
+        # Write SAM hashes to SAMHashes.txt
+        $samHashes | Set-Content -Path (Join-Path $newDirectoryPath "SAMHashes.txt")
     }
 }
+
+
 
 
 
