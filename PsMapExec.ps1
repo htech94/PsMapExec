@@ -70,7 +70,13 @@ Param(
     [String]$SprayHash = "",
 
     [Parameter(Mandatory=$False, Position=22, ValueFromPipeline=$true)]
-    [String]$SprayPassword = ""
+    [String]$SprayPassword = "",
+
+    [Parameter(Mandatory=$False, Position=23, ValueFromPipeline=$true)]
+    [switch]$NoBanner,
+
+    [Parameter(Mandatory=$False, Position=24, ValueFromPipeline=$true)]
+    [string]$DomainController
 )
 
 # Check for mandatory parameter
@@ -96,14 +102,14 @@ $Banner = @("
  | |     ____) | |  | |/ ____ \| |    | |____ / . \| |___| |____ 
  |_|    |_____/|_|  |_/_/    \_\_|    |______/_/ \_\______\_____|
                                                                  
+
+Github  : https://github.com/The-Viper-One
+Version : 0.4.3
 ")
 
+if (!$NoBanner){
 Write-Output $Banner
-Write-Host "Github  : "  -NoNewline
-Write-Host "https://github.com/The-Viper-One"
-Write-Host "Version : " -NoNewline
-Write-Host "0.4.3"
-Write-Host
+}
 
 # If no targets have been provided
 if (-not $Targets -and $Method -ne "Spray") {
@@ -661,25 +667,43 @@ if (!$CurrentUser) {
 ########################################## Domain Target Acquisition ###########################################
 ################################################################################################################
 
-Function Bind {
-param ($Domain)
-    $DirectoryEntry = [ADSI]"LDAP://$domain"
+function Establish-LDAPSession {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$Domain,
 
-if ($DirectoryEntry.distinguishedName) {} else {
-    
-    Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
-    Write-Host "Failed to bind to the domain"
+        [string]$DomainController  # Optional parameter for domain controller
+    )
 
-    if (!$DomainJoined){
-    Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
-    Write-Host "Ensure the credentials parameters provided are for a valid account"
+    # Define LDAP parameters
+    $ldapServer = if ($DomainController) { $DomainController } else { $Domain }
+    $ldapPort = 389 # Use 636 for LDAPS (SSL)
+
+    # Load necessary assembly
+    Add-Type -AssemblyName "System.DirectoryServices.Protocols"
+
+    try {
+        # Create LDAP directory identifier
+        $identifier = New-Object System.DirectoryServices.Protocols.LdapDirectoryIdentifier($ldapServer, $ldapPort)
+
+        # Establish LDAP connection as current user
+        $ldapConnection = New-Object System.DirectoryServices.Protocols.LdapConnection($identifier)
+
+        # Use Negotiate (Kerberos or NTLM) for authentication
+        $ldapConnection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Negotiate
+
+        # Bind (establish connection)
+        $ldapConnection.Bind()  # Bind as the current user
+
     }
-    continue
-    
+    catch {
+        Write-Error "Failed to establish LDAP connection to '$ldapServer'. Error: $_"
+        continue
     }
 }
 
-Bind -Domain $Domain
+if ($DomainController -ne ""){Establish-LDAPSession -Domain $Domain -DomainController $DomainController}
+else {Establish-LDAPSession -Domain $Domain}
 
 
 function New-Searcher {
@@ -949,6 +973,42 @@ elseif ($Method -eq "GenRelayList"){
     Write-Host "SMB Signing output will be written to $SMB"
 }
 
+
+function Display-ComputerStatus {
+    param (
+        [string]$Prefix,
+        [string]$ComputerName,
+        [string]$OS,
+        [System.ConsoleColor]$statusColor = 'White',
+        [string]$statusSymbol = "",
+        [string]$statusText = "",
+        [int]$NameLength,
+        [int]$OSLength
+    )
+
+    # Prefix
+    Write-Host "$Prefix " -ForegroundColor Yellow -NoNewline
+    Write-Host "   " -NoNewline
+    
+    # Resolve IP
+    $IP = $null
+    $Ping = New-Object System.Net.NetworkInformation.Ping 
+    $Result = $Ping.Send($ComputerName, 15)
+    if ($Result.Status -eq 'Success') {
+    $IP = $Result.Address.IPAddressToString
+    Write-Host ("{0,-16}" -f $IP) -NoNewline
+    } else {Write-Host ("{0,-16}" -f $IP) -NoNewline}
+    
+    # Display ComputerName and OS
+    Write-Host ("{0,-$NameLength}" -f $ComputerName) -NoNewline
+    Write-Host "   " -NoNewline
+    Write-Host ("{0,-$OSLength}" -f $OS) -NoNewline
+    Write-Host "   " -NoNewline
+
+    # Display status symbol and text
+    Write-Host $statusSymbol -ForegroundColor $statusColor -NoNewline
+    Write-Host $statusText
+}
 
 ################################################################################################################
 ######################################## Local scripts and modules #############################################
@@ -4281,11 +4341,8 @@ function Display-ComputerStatus {
     Write-Host "   " -NoNewline
     
     Write-Host ("{0,-16}" -f $IPAddress) -NoNewline
-    Write-Host "   " -NoNewline
     
     # Display ComputerName, OS, and NamedInstance
-    Write-Host "$ComputerName" -noNewLine
-    Write-Host "   " -NoNewline
     Write-Host ("{0,-$InstanceLength}" -f $NamedInstance) -NoNewline
     Write-Host "   " -NoNewline
 
@@ -5367,172 +5424,171 @@ Function Parse-NTDS {
 ################################################ Function: All #################################################
 ################################################################################################################
 Function Method-all {
+    # Create a runspace pool
+    $runspacePool = [runspacefactory]::CreateRunspacePool(1, $Threads)
+    $runspacePool.Open()
+    $runspaces = New-Object System.Collections.ArrayList
 
-# Create a runspace pool
-$runspacePool = [runspacefactory]::CreateRunspacePool(1, $Threads)
-$runspacePool.Open()
-$runspaces = New-Object System.Collections.ArrayList
+    $scriptBlock = {
+        param ($computerName, $Domain)
 
-$scriptBlock = {
-    param ($computerName)
+        Function Test-Port {
+            param ($ComputerName, $Port)
+            $tcpClient = New-Object System.Net.Sockets.TcpClient
+            $asyncResult = $tcpClient.BeginConnect($ComputerName, $Port, $null, $null)
+            $wait = $asyncResult.AsyncWaitHandle.WaitOne(50)
 
-Function Test-Port {
-    param ($ComputerName, $Port)
-    $tcpClient = New-Object System.Net.Sockets.TcpClient
-    $asyncResult = $tcpClient.BeginConnect($ComputerName, $Port, $null, $null)
-    $wait = $asyncResult.AsyncWaitHandle.WaitOne(50) 
-
-    if ($wait) { 
-        try {
-            $tcpClient.EndConnect($asyncResult)
-            return $true
-        } catch {
-            return $false
-        }
-    } else {
-        return $false
-    }
-}
-
-# Check Ports
-$WinRMPort = Test-Port -ComputerName $ComputerName -Port 5985
-$WMIPort = Test-Port -ComputerName $ComputerName -Port 135
-$SMBPort = Test-Port -ComputerName $ComputerName -Port 445
-
-# if all three fail, return and kill the runspace
-if (-not $SMBPort -and -not $WMIPort -and -not $WinRMPort) {
-    return "Unable to connect"
-}
-
-# SMB Check
-if ($SMBPort){
-    $SMBCheck = Test-Path "\\$ComputerName\c$" -ErrorAction SilentlyContinue
-    if (-not $SMBCheck) {
-        $SMBAccess = $False
-    } else {
-        $SMBAccess = $True
-    }
-}
-
-# WMI Check
-if ($WMIPort) {
-    try {
-        Get-WmiObject -Class Win32_OperatingSystem -ComputerName $ComputerName -ErrorAction Stop
-        $WMIAccess = $True  # Set WMIAccess to true if command succeeds
-    } catch {
-        $WMIAccess = $False  # Set WMIAccess to false if command fails
-    }
-}
-
-# WinRM Check
-if ($WinRMPort){        
-    try {
-        Invoke-Command -ComputerName $computerName -ScriptBlock {echo "Successful Connection PME"} -ErrorAction Stop 
-        $WinRMAccess = $True
-    } catch {
-        if ($_.Exception.Message -like "*Access is Denied*") {
-            $WinRMAccess = $False
-        } elseif ($_.Exception.Message -like "*cannot be resolved*") {
-            $WinRMAccess = $False
-        }
-    }
-}
-
-return @{WMIAccess = $WMIAccess; SMBAccess = $SMBAccess; WinRMAccess = $WinRMAccess}
-
-}
-
-
-
-function Display-ComputerStatus {
-    param (
-        [string]$ComputerName,
-        [string]$OS,
-        [System.ConsoleColor]$statusColor = 'White',
-        [string]$statusSymbol = "",
-        [string]$statusText = "",
-        [int]$NameLength,
-        [int]$OSLength,
-        [string]$successfulProtocols  # New parameter to display successful protocols
-    )
-
-    # Prefix
-    Write-Host "All " -ForegroundColor Yellow -NoNewline
-    Write-Host "   " -NoNewline
-    
-    # Resolve IP
-    $IP = $null
-    $Ping = New-Object System.Net.NetworkInformation.Ping 
-    $Result = $Ping.Send($ComputerName, 15)
-    if ($Result.Status -eq 'Success') {
-    $IP = $Result.Address.IPAddressToString
-    Write-Host ("{0,-16}" -f $IP) -NoNewline
-    } else {Write-Host ("{0,-16}" -f $IP) -NoNewline}
-    
-    # Display ComputerName and OS
-    Write-Host ("{0,-$NameLength}" -f $ComputerName) -NoNewline
-    Write-Host "   " -NoNewline
-    Write-Host ("{0,-$OSLength}" -f $OS) -NoNewline
-    Write-Host "   " -NoNewline
-
-    # Display status symbol and text
-    Write-Host $statusSymbol -ForegroundColor $statusColor -NoNewline
-    Write-Host $statusText
-}
-
-
-# Create and invoke runspaces for each computer
-foreach ($computer in $computers) {
-
-    $ComputerName = $computer.Properties["dnshostname"][0]
-    $OS = $computer.Properties["operatingSystem"][0]
-    
-    $runspace = [powershell]::Create().AddScript($scriptBlock).AddArgument($ComputerName)
-    $runspace.RunspacePool = $runspacePool
-
-    [void]$runspaces.Add([PSCustomObject]@{
-        Runspace = $runspace
-        Handle = $runspace.BeginInvoke()
-        ComputerName = $ComputerName
-        OS = $OS
-        Completed = $false
-        })
-}
-
-# Poll the runspaces and display results as they complete
-do {
-    foreach ($runspace in $runspaces | Where-Object { -not $_.Completed }) {
-        if ($runspace.Handle.IsCompleted) {
-            $runspace.Completed = $true
-            $result = $runspace.Runspace.EndInvoke($runspace.Handle)
-
-            if ($result -eq "Unable to connect") {continue}
-
-            # Build string of successful protocols
-            $successfulProtocols = @()
-            if ($result.SMBAccess -eq $True) { $successfulProtocols += "SMB" }
-            if ($result.WinRMAccess -eq $True) { $successfulProtocols += "WinRM" }
-            if ($result.WMIAccess -eq $True) { $successfulProtocols += "WMI" }
-
-            if ($successfulProtocols.Count -gt 0) {
-                $statusText = $successfulProtocols -join ', '
-                Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText $statusText -NameLength $NameLength -OSLength $OSLength
-                continue
+            if ($wait) {
+                try {
+                    $tcpClient.EndConnect($asyncResult)
+                    return $true
+                } catch {
+                    return $false
+                }
             } else {
-                Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NameLength $NameLength -OSLength $OSLength
-                continue
+                return $false
             }
         }
+
+        # Check Ports
+        $WinRMPort = Test-Port -ComputerName $ComputerName -Port 5985
+        $WMIPort = Test-Port -ComputerName $ComputerName -Port 135
+        $SMBPort = Test-Port -ComputerName $ComputerName -Port 445
+
+
+        # if all three fail, return and kill the runspace
+        if (-not $SMBPort -and -not $WMIPort -and -not $WinRMPort) {
+            return "Unable to connect"
+        }
+
+        # SMB Check
+        if ($SMBPort) {
+            $SMBCheck = Test-Path "\\$ComputerName\c$" -ErrorAction SilentlyContinue
+            if (-not $SMBCheck) {
+                $SMBAccess = $False
+            } else {
+                $SMBAccess = $True
+            }
+        }
+
+        # WMI Check
+        if ($WMIPort) {
+            try {
+                Get-WmiObject -Class Win32_OperatingSystem -ComputerName $ComputerName -ErrorAction Stop
+                $WMIAccess = $True  # Set WMIAccess to true if command succeeds
+            } catch {
+                $WMIAccess = $False  # Set WMIAccess to false if command fails
+            }
+        }
+
+        # WinRM Check
+        if ($WinRMPort) {
+            try {
+                Invoke-Command -ComputerName $computerName -ScriptBlock {echo "Successful Connection PME"} -ErrorAction Stop
+                $WinRMAccess = $True
+            } catch {
+                if ($_.Exception.Message -like "*Access is Denied*") {
+                    $WinRMAccess = $False
+                } elseif ($_.Exception.Message -like "*cannot be resolved*") {
+                    $WinRMAccess = $False
+                }
+            }
+        }
+
+        return @{
+            WMIAccess = $WMIAccess
+            SMBAccess = $SMBAccess
+            WinRMAccess = $WinRMAccess
+        }
     }
-    Start-Sleep -Milliseconds 100
-} while ($runspaces | Where-Object { -not $_.Completed })
 
+    function Display-ComputerStatus {
+        param (
+            [string]$ComputerName,
+            [string]$OS,
+            [System.ConsoleColor]$statusColor = 'White',
+            [string]$statusSymbol = "",
+            [string]$statusText = "",
+            [int]$NameLength,
+            [int]$OSLength,
+            [string]$successfulProtocols  # New parameter to display successful protocols
+        )
 
+        # Prefix
+        Write-Host "All " -ForegroundColor Yellow -NoNewline
+        Write-Host "   " -NoNewline
 
-# Clean up
-$runspacePool.Close()
-$runspacePool.Dispose()
+        # Resolve IP
+        $IP = $null
+        $Ping = New-Object System.Net.NetworkInformation.Ping
+        $Result = $Ping.Send($ComputerName, 15)
+        if ($Result.Status -eq 'Success') {
+            $IP = $Result.Address.IPAddressToString
+            Write-Host ("{0,-16}" -f $IP) -NoNewline
+        } else {
+            Write-Host ("{0,-16}" -f $IP) -NoNewline
+        }
 
+        # Display ComputerName and OS
+        Write-Host ("{0,-$NameLength}" -f $ComputerName) -NoNewline
+        Write-Host "   " -NoNewline
+        Write-Host ("{0,-$OSLength}" -f $OS) -NoNewline
+        Write-Host "   " -NoNewline
+
+        # Display status symbol and text
+        Write-Host $statusSymbol -ForegroundColor $statusColor -NoNewline
+        Write-Host $statusText
+    }
+
+    # Create and invoke runspaces for each computer
+    foreach ($computer in $computers) {
+
+        $ComputerName = $computer.Properties["dnshostname"][0]
+        $OS = $computer.Properties["operatingSystem"][0]
+
+        $runspace = [powershell]::Create().AddScript($scriptBlock).AddArgument($ComputerName).AddArgument($Domain)
+        $runspace.RunspacePool = $runspacePool
+
+        [void]$runspaces.Add([PSCustomObject]@{
+            Runspace = $runspace
+            Handle = $runspace.BeginInvoke()
+            ComputerName = $ComputerName
+            OS = $OS
+            Completed = $false
+        })
+    }
+
+    # Poll the runspaces and display results as they complete
+    do {
+        foreach ($runspace in $runspaces | Where-Object { -not $_.Completed }) {
+            if ($runspace.Handle.IsCompleted) {
+                $runspace.Completed = $true
+                $result = $runspace.Runspace.EndInvoke($runspace.Handle)
+                
+                if ($result -eq "Unable to connect") { continue }
+
+                # Build string of successful protocols
+                $successfulProtocols = @()
+                if ($result.SMBAccess -eq $True) { $successfulProtocols += "SMB" }
+                if ($result.WinRMAccess -eq $True) { $successfulProtocols += "WinRM" }
+                if ($result.WMIAccess -eq $True) { $successfulProtocols += "WMI" }
+
+                if ($successfulProtocols.Count -gt 0) {
+                    $statusText = $successfulProtocols -join ', '
+                    Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText $statusText -NameLength $NameLength -OSLength $OSLength
+                    continue
+                } else {
+                    Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NameLength $NameLength -OSLength $OSLength
+                    continue
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ($runspaces | Where-Object { -not $_.Completed })
+
+    # Clean up
+    $runspacePool.Close()
+    $runspacePool.Dispose()
 }
 
 ################################################################################################################
