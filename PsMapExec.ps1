@@ -5510,25 +5510,22 @@ do {
 
             # Build string of successful protocols
             $successfulProtocols = @()
-            if ($result.SMBAccess) { $successfulProtocols += "SMB" }
-            if ($result.WinRMAccess) { $successfulProtocols += "WinRM" }
-            if ($result.WMIAccess) { $successfulProtocols += "WMI" }
+            if ($result.SMBAccess -eq $True) { $successfulProtocols += "SMB" }
+            if ($result.WinRMAccess -eq $True) { $successfulProtocols += "WinRM" }
+            if ($result.WMIAccess -eq $True) { $successfulProtocols += "WMI" }
 
             if ($successfulProtocols.Count -gt 0) {
                 $statusText = $successfulProtocols -join ', '
                 Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText $statusText -NameLength $NameLength -OSLength $OSLength
+                continue
             } else {
                 Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NameLength $NameLength -OSLength $OSLength
+                continue
             }
         }
     }
     Start-Sleep -Milliseconds 100
 } while ($runspaces | Where-Object { -not $_.Completed })
-
-
-
-
-
 
 
 
