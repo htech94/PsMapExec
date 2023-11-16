@@ -121,6 +121,7 @@ if (-not $Targets -and $Method -ne "Spray") {
 
 if ($Method -ne "") {
     switch ($Method) {
+        "All" {}
         "WinRM" {}
         "MSSQL" {}
         "SMB" {}
@@ -5366,14 +5367,187 @@ Function Parse-NTDS {
 }
 
 
+################################################################################################################
+################################################ Function: All #################################################
+################################################################################################################
+Function Method-all {
+
+# Create a runspace pool
+$runspacePool = [runspacefactory]::CreateRunspacePool(1, $Threads)
+$runspacePool.Open()
+$runspaces = New-Object System.Collections.ArrayList
+
+$scriptBlock = {
+    param ($computerName)
+
+Function Test-Port {
+    param ($ComputerName, $Port)
+    $tcpClient = New-Object System.Net.Sockets.TcpClient
+    $asyncResult = $tcpClient.BeginConnect($ComputerName, $Port, $null, $null)
+    $wait = $asyncResult.AsyncWaitHandle.WaitOne(50) 
+
+    if ($wait) { 
+        try {
+            $tcpClient.EndConnect($asyncResult)
+            return $true
+        } catch {
+            return $false
+        }
+    } else {
+        return $false
+    }
+}
+
+# Check Ports
+$WinRMPort = Test-Port -ComputerName $ComputerName -Port 5985
+$WMIPort = Test-Port -ComputerName $ComputerName -Port 135
+$SMBPort = Test-Port -ComputerName $ComputerName -Port 445
+
+# if all three fail, return and kill the runspace
+if (-not $SMBPort -and -not $WMIPort -and -not $WinRMPort) {
+    return "Unable to connect"
+}
+
+# SMB Check
+if ($SMBPort){
+    $SMBCheck = Test-Path "\\$ComputerName\c$" -ErrorAction SilentlyContinue
+    if (-not $SMBCheck) {
+        $SMBAccess = $False
+    } else {
+        $SMBAccess = $True
+    }
+}
+
+# WMI Check
+if ($WMIPort) {
+    try {
+        Get-WmiObject -Class Win32_OperatingSystem -ComputerName $ComputerName -ErrorAction Stop
+        $WMIAccess = $True  # Set WMIAccess to true if command succeeds
+    } catch {
+        $WMIAccess = $False  # Set WMIAccess to false if command fails
+    }
+}
+
+# WinRM Check
+if ($WinRMPort){        
+    try {
+        Invoke-Command -ComputerName $computerName -ScriptBlock {echo "Successful Connection PME"} -ErrorAction Stop 
+        $WinRMAccess = $True
+    } catch {
+        if ($_.Exception.Message -like "*Access is Denied*") {
+            $WinRMAccess = $False
+        } elseif ($_.Exception.Message -like "*cannot be resolved*") {
+            $WinRMAccess = $False
+        }
+    }
+}
+
+return @{WMIAccess = $WMIAccess; SMBAccess = $SMBAccess; WinRMAccess = $WinRMAccess}
+
+}
 
 
+
+function Display-ComputerStatus {
+    param (
+        [string]$ComputerName,
+        [string]$OS,
+        [System.ConsoleColor]$statusColor = 'White',
+        [string]$statusSymbol = "",
+        [string]$statusText = "",
+        [int]$NameLength,
+        [int]$OSLength,
+        [string]$successfulProtocols  # New parameter to display successful protocols
+    )
+
+    # Prefix
+    Write-Host "All " -ForegroundColor Yellow -NoNewline
+    Write-Host "   " -NoNewline
+    
+    # Resolve IP
+    $IP = $null
+    $Ping = New-Object System.Net.NetworkInformation.Ping 
+    $Result = $Ping.Send($ComputerName, 15)
+    if ($Result.Status -eq 'Success') {
+    $IP = $Result.Address.IPAddressToString
+    Write-Host ("{0,-16}" -f $IP) -NoNewline
+    } else {Write-Host ("{0,-16}" -f $IP) -NoNewline}
+    
+    # Display ComputerName and OS
+    Write-Host ("{0,-$NameLength}" -f $ComputerName) -NoNewline
+    Write-Host "   " -NoNewline
+    Write-Host ("{0,-$OSLength}" -f $OS) -NoNewline
+    Write-Host "   " -NoNewline
+
+    # Display status symbol and text
+    Write-Host $statusSymbol -ForegroundColor $statusColor -NoNewline
+    Write-Host $statusText
+}
+
+
+# Create and invoke runspaces for each computer
+foreach ($computer in $computers) {
+
+    $ComputerName = $computer.Properties["dnshostname"][0]
+    $OS = $computer.Properties["operatingSystem"][0]
+    
+    $runspace = [powershell]::Create().AddScript($scriptBlock).AddArgument($ComputerName)
+    $runspace.RunspacePool = $runspacePool
+
+    [void]$runspaces.Add([PSCustomObject]@{
+        Runspace = $runspace
+        Handle = $runspace.BeginInvoke()
+        ComputerName = $ComputerName
+        OS = $OS
+        Completed = $false
+        })
+}
+
+# Poll the runspaces and display results as they complete
+do {
+    foreach ($runspace in $runspaces | Where-Object { -not $_.Completed }) {
+        if ($runspace.Handle.IsCompleted) {
+            $runspace.Completed = $true
+            $result = $runspace.Runspace.EndInvoke($runspace.Handle)
+
+            if ($result -eq "Unable to connect") {continue}
+
+            # Build string of successful protocols
+            $successfulProtocols = @()
+            if ($result.SMBAccess) { $successfulProtocols += "SMB" }
+            if ($result.WinRMAccess) { $successfulProtocols += "WinRM" }
+            if ($result.WMIAccess) { $successfulProtocols += "WMI" }
+
+            if ($successfulProtocols.Count -gt 0) {
+                $statusText = $successfulProtocols -join ', '
+                Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText $statusText -NameLength $NameLength -OSLength $OSLength
+            } else {
+                Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NameLength $NameLength -OSLength $OSLength
+            }
+        }
+    }
+    Start-Sleep -Milliseconds 100
+} while ($runspaces | Where-Object { -not $_.Completed })
+
+
+
+
+
+
+
+
+# Clean up
+$runspacePool.Close()
+$runspacePool.Dispose()
+
+}
 
 ################################################################################################################
 ################################################ Execute defined functions #####################################
 ################################################################################################################
 
 switch ($Method) {
+        "All" {Method-All}
         "WinRM" {Method-WinRM}
         "MSSQL" {Method-MSSQL}
         "SMB" {Method-SMB}
