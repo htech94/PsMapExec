@@ -126,6 +126,8 @@ if ($DomainJoined) {
     Write-Output "Domain  : No"
 }
 
+Write-Host
+
 
 
 
