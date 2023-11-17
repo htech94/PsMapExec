@@ -110,33 +110,22 @@ if (!$NoBanner){
 Write-Output $Banner
 }
 
-
 function Test-DomainJoinStatus {
-    try {
-        $computerSystem = Get-WmiObject Win32_ComputerSystem
-        if ($computerSystem.PartOfDomain) {
-            $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
-            $domainController = $domain.FindDomainController()
-
-            if ($domainController -ne $null) {
-                $DomainJoined = $True
-            }
-            else {
-                $DomainJoined = $True
-            }
-        }
-        else {
-            $DomainJoined = $False
-        }
-    }
-    catch {
-        Write-Host "An error occurred: $_"
+    if ((Get-WmiObject Win32_ComputerSystem).PartOfDomain) {
+        return $true
+    } else {
+        return $false
     }
 }
 
-Test-DomainJoinStatus
-if ($DomainJoined){Write-Output "Domain  : Yes"}
-elseif (!$DomainJoined){Write-Output "Domain  : No"}
+$DomainJoined = Test-DomainJoinStatus
+
+if ($DomainJoined) {
+    Write-Output "Domain  : Yes"
+} elseif (!$DomainJoined) {
+    Write-Output "Domain  : No"
+}
+
 
 
 
@@ -806,7 +795,44 @@ if ($Method -ne "Spray"){
 $searcher = New-Searcher
 $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
 
-if ($Targets -eq "Workstations") {
+# Check if $Targets is a file path and process it
+if (Test-Path $Targets -PathType Leaf) {
+    $fileContent = Get-Content -Path $Targets
+    $computers = @()
+
+    # Determine if the file is line-separated or comma-separated
+    if ($fileContent -match ",") {
+        # Comma-separated list
+        $computerNames = $fileContent -split ',' | ForEach-Object { $_.Trim() }
+    } else {
+        # Line-separated list
+        $computerNames = $fileContent
+    }
+
+    foreach ($name in $computerNames) {
+        # Skip empty lines or entries
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            continue
+        }
+
+        # Append domain if $name is not an FQDN
+        if ($name -notlike "*.*") {
+            $name += ".$domain"
+        }
+
+        $searcher.Filter = "(dnshostname=$name)"
+        $result = $searcher.FindOne()
+
+        if ($result -ne $null) {
+            $computers += $result.GetDirectoryEntry()
+        } else {
+            Write-Warning "No LDAP entry found for $name"
+        }
+    }
+}
+
+
+elseif ($Targets -eq "Workstations") {
 
 $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
 $computers = $searcher.FindAll() | Where-Object { $_.Properties["operatingSystem"][0]  -notlike "*windows*server*" -and $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
