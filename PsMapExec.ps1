@@ -126,7 +126,6 @@ if ($DomainJoined) {
     Write-Output "Domain  : No"
 }
 
-Write-Host
 
 
 
@@ -144,6 +143,7 @@ if ($Targets -match "^\*+$") {
     Write-Host "The target cannot consist only of asterisks. Please specify a more specific target."
     return
 }
+
 
 
 ################################################################################################################
@@ -812,88 +812,92 @@ if (IPAddress -Target $Targets) {
     $IPAddress = $False
 }
 
-Write-host $IPAddress
 
 
 if ($Method -ne "Spray") {
-    if (!$IPAddress){
-    $searcher = New-Searcher
-    $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
+    if (!$IPAddress) {
+        $searcher = New-Searcher
+        $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
 
-    if ($Targets -eq "Workstations") {
-        Write-Host "Processing Workstations" -ForegroundColor "Green"
-        $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-        $computers = $searcher.FindAll() | Where-Object {
-            $_.Properties["operatingSystem"][0] -notlike "*windows*server*" -and
-            $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+        if ($Targets -match "^\*.*|.*\*$") {
+            Write-Host "Targets : Wildcard matching"
+            $wildcardFilter = $Targets -replace "\*", "*"
+            $searcher.Filter = "(&(objectCategory=computer)(dnshostname=$wildcardFilter))"
+            $computers = $searcher.FindAll() | Where-Object {
+                $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+            }
         }
-    }
-    elseif ($Targets -eq "Servers") {
-        Write-Host "Processing Servers" -ForegroundColor "Green"
-        $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-        $computers = $searcher.FindAll() | Where-Object {
-            $_.Properties["operatingSystem"][0] -like "*server*" -and
-            $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+        elseif ($Targets -eq "Workstations") {
+            Write-Host "Targets : Workstations"
+            $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+            $computers = $searcher.FindAll() | Where-Object {
+                $_.Properties["operatingSystem"][0] -notlike "*windows*server*" -and
+                $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+            }
         }
-    }
-    elseif ($Targets -eq "DC" -or $Targets -eq "DCs" -or $Targets -eq "DomainControllers" -or $Targets -eq "Domain Controllers") {
-        Write-Host "Processing DCs" -ForegroundColor "Green"
-        $searcher.Filter = "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-        $computers = $searcher.FindAll()
-    }
-    elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
-        Write-Host "All" -ForegroundColor "Green"
-        $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-        $computers = $searcher.FindAll() | Where-Object {
-            $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+        elseif ($Targets -eq "Servers") {
+            Write-Host "Targets : Servers"
+            $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+            $computers = $searcher.FindAll() | Where-Object {
+                $_.Properties["operatingSystem"][0] -like "*server*" -and
+                $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+            }
         }
-    }
+        elseif ($Targets -eq "DC" -or $Targets -eq "DCs" -or $Targets -eq "DomainControllers" -or $Targets -eq "Domain Controllers") {
+            Write-Host "Targets : Domain Controllers"
+            $searcher.Filter = "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+            $computers = $searcher.FindAll()
+        }
+        elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
+            Write-Host "Targets : All"
+            $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+            $computers = $searcher.FindAll() | Where-Object {
+                $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+            }
+        }
+        elseif ($Targets -notmatch "\*") {
+            $IsFile = Test-Path $Targets
+            if ($IsFile) {
+                Write-Host "Targets : File ($Targets)"
+                $fileContent = Get-Content -Path $Targets
+                $computers = @()
 
-    elseif ($Targets -notmatch "\*") {
-    $IsFile = Test-Path $Targets
-    if ($IsFile) {
-        Write-Host "Processing File: $Targets" -ForegroundColor "Green"
-        $fileContent = Get-Content -Path $Targets
-        $computers = @()
+                foreach ($line in $fileContent) {
+                    # Split the line by comma and trim any spaces
+                    $names = $line -split ',' | ForEach-Object { $_.Trim() }
 
-        foreach ($line in $fileContent) {
-            # Split the line by comma and trim any spaces
-            $names = $line -split ',' | ForEach-Object { $_.Trim() }
+                    foreach ($name in $names) {
+                        if ([string]::IsNullOrWhiteSpace($name)) {
+                            continue
+                        }
 
-            foreach ($name in $names) {
-                if ([string]::IsNullOrWhiteSpace($name)) {
-                    continue
+                        if ($name -notlike "*.*") {
+                            $name += ".$domain"
+                        }
+
+                        $searcher.Filter = "(dnshostname=$name)"
+                        $result = $searcher.FindOne()
+
+                        if ($result -ne $null) {
+                            $computers += $result.GetDirectoryEntry()
+                        } else {
+                            Write-Warning "No LDAP entry found for $name"
+                        }
+                    }
                 }
-
-                if ($name -notlike "*.*") {
-                    $name += ".$domain"
+            } else {
+                Write-Host "Targets : $Targets"
+                if ($Targets -notlike "*.*") {
+                    $Targets += ".$domain"
                 }
-
-                $searcher.Filter = "(dnshostname=$name)"
+                $searcher.Filter = "(dnshostname=$Targets)"
                 $result = $searcher.FindOne()
 
                 if ($result -ne $null) {
-                    $computers += $result.GetDirectoryEntry()
+                    $computers = @($result.GetDirectoryEntry())
                 } else {
-                    Write-Warning "No LDAP entry found for $name"
-                }
-            }
-        }
-    }
-        else {
-            Write-Host "Processing Single Computer Name: $Targets" -ForegroundColor "Green"
-            if ($Targets -notlike "*.*") {
-                $Targets += ".$domain"
-            }
-            $searcher.Filter = "(dnshostname=$Targets)"
-            $result = $searcher.FindOne()
-
-            if ($result -ne $null) {
-                $computers = @($result.GetDirectoryEntry())
-            } else {
-                Write-Warning "No LDAP entry found for the computer: $Targets"
-                $computers = @()
-                
+                    Write-Warning "No LDAP entry found for the computer: $Targets"
+                    $computers = @()
                 }
             }
         }
@@ -902,6 +906,7 @@ if ($Method -ne "Spray") {
 
 
 
+Write-Output ""
 
 ################################################################################################################
 ############################ Grab interesting users for various parsing functions ##############################
