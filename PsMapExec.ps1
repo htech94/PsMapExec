@@ -134,12 +134,16 @@ Write-Host
 
 # If no targets have been provided
 if (-not $Targets -and $Method -ne "Spray") {
-    Write-host "[-]  " -ForegroundColor "Red" -NoNewline
+    Write-host "[*]  " -ForegroundColor "Yellow" -NoNewline
     Write-host "You must provide a value for -targets (all, servers, DCs, Workstations)"
     return
 }
 
-
+if ($Targets -match "^\*+$") {
+    Write-host "[*]  " -ForegroundColor "Yellow" -NoNewline
+    Write-Host "The target cannot consist only of asterisks. Please specify a more specific target."
+    return
+}
 
 
 ################################################################################################################
@@ -797,38 +801,32 @@ if ($Method -ne "Spray"){
 $searcher = New-Searcher
 $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
 
-# Check if $Targets is a file path and process it
-if (Test-Path $Targets -PathType Leaf) {
-    $fileContent = Get-Content -Path $Targets
-    $computers = @()
+if ($Targets -notmatch "\*") {
 
-    # Determine if the file is line-separated or comma-separated
-    if ($fileContent -match ",") {
-        # Comma-separated list
-        $computerNames = $fileContent -split ',' | ForEach-Object { $_.Trim() }
-    } else {
-        # Line-separated list
-        $computerNames = $fileContent
-    }
+    if (Test-Path $Targets -PathType Leaf) {
+        $fileContent = Get-Content -Path $Targets
+        $computers = @()
 
-    foreach ($name in $computerNames) {
-        # Skip empty lines or entries
-        if ([string]::IsNullOrWhiteSpace($name)) {
-            continue
-        }
+        foreach ($name in $fileContent) {
+            
+            # Skip empty lines or entries
+            if ([string]::IsNullOrWhiteSpace($name)) {
+                continue
+            }
 
-        # Append domain if $name is not an FQDN
-        if ($name -notlike "*.*") {
-            $name += ".$domain"
-        }
+            # Append domain if $name is not an FQDN
+            if ($name -notlike "*.*") {
+                $name += ".$domain"
+            }
 
-        $searcher.Filter = "(dnshostname=$name)"
-        $result = $searcher.FindOne()
+            $searcher.Filter = "(dnshostname=$name)"
+            $result = $searcher.FindOne()
 
-        if ($result -ne $null) {
-            $computers += $result.GetDirectoryEntry()
-        } else {
-            Write-Warning "No LDAP entry found for $name"
+            if ($result -ne $null) {
+                $computers += $result.GetDirectoryEntry()
+            } else {
+                Write-Warning "No LDAP entry found for $name"
+            }
         }
     }
 }
@@ -852,12 +850,20 @@ $searcher.Filter = "(&(objectCategory=computer)(userAccountControl:1.2.840.11355
 $computers = $searcher.FindAll()
 
 }
+
 elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
 
 
 $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
 $computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
 
+}
+
+elseif ($Targets -match "^.+\*$|\*^.+$") {
+    # If $Targets contains valid wildcard patterns
+    $wildcardFilter = $Targets -replace "\*", "*"
+    $searcher.Filter = "(&(objectCategory=computer)(dnshostname=$wildcardFilter))"
+    $computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
 }
 
 
@@ -889,6 +895,8 @@ elseif ($Method -ne "Spray") {
     $searcher = [System.DirectoryServices.DirectorySearcher]::new()
     $computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0] -in $Targets }
 }
+
+
 
 }
 
