@@ -797,7 +797,26 @@ function New-Searcher {
     return $searcher
 }
 
+function IPAddress {
+    param ([string]$Target)
+
+    $IPAddress = $null
+    return [System.Net.IPAddress]::TryParse($Target, [ref]$IPAddress)
+}
+
+if (IPAddress -Target $Targets) {
+    $IPAddress = $True
+    RestoreTicket
+    return
+} else {
+    $IPAddress = $False
+}
+
+Write-host $IPAddress
+
+
 if ($Method -ne "Spray") {
+    if (!$IPAddress){
     $searcher = New-Searcher
     $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
 
@@ -874,6 +893,8 @@ if ($Method -ne "Spray") {
             } else {
                 Write-Warning "No LDAP entry found for the computer: $Targets"
                 $computers = @()
+                
+                }
             }
         }
     }
