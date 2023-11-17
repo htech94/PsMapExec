@@ -797,109 +797,88 @@ function New-Searcher {
     return $searcher
 }
 
-if ($Method -ne "Spray"){
-$searcher = New-Searcher
-$searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
+if ($Method -ne "Spray") {
+    $searcher = New-Searcher
+    $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
 
+    if ($Targets -eq "Workstations") {
+        Write-Host "Processing Workstations" -ForegroundColor "Green"
+        $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+        $computers = $searcher.FindAll() | Where-Object {
+            $_.Properties["operatingSystem"][0] -notlike "*windows*server*" -and
+            $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+        }
+    }
+    elseif ($Targets -eq "Servers") {
+        Write-Host "Processing Servers" -ForegroundColor "Green"
+        $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+        $computers = $searcher.FindAll() | Where-Object {
+            $_.Properties["operatingSystem"][0] -like "*server*" -and
+            $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+        }
+    }
+    elseif ($Targets -eq "DC" -or $Targets -eq "DCs" -or $Targets -eq "DomainControllers" -or $Targets -eq "Domain Controllers") {
+        Write-Host "Processing DCs" -ForegroundColor "Green"
+        $searcher.Filter = "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+        $computers = $searcher.FindAll()
+    }
+    elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
+        Write-Host "All" -ForegroundColor "Green"
+        $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+        $computers = $searcher.FindAll() | Where-Object {
+            $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+        }
+    }
 
-
-if ($Targets -eq "Workstations") {
-$searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-$computers = $searcher.FindAll() | Where-Object { $_.Properties["operatingSystem"][0]  -notlike "*windows*server*" -and $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
-
-}
-elseif ($Targets -eq "Servers") {
-
-$searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-$computers = $searcher.FindAll() | Where-Object { $_.Properties["operatingSystem"][0]  -like "*server*" -and $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
-
-}
-elseif ($Targets -eq "DC" -or $Targets -eq "DCs" -or $Targets -eq "DomainControllers" -or $Targets -eq "Domain Controllers") {
-
-$searcher.Filter = "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-$computers = $searcher.FindAll()
-
-}
-
-elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
-
-
-$searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-$computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
-
-}
-
-elseif ($Targets -notmatch "\*") {
-
-    if (Test-Path $Targets -PathType Leaf) {
+    elseif ($Targets -notmatch "\*") {
+    $IsFile = Test-Path $Targets
+    if ($IsFile) {
+        Write-Host "Processing File: $Targets" -ForegroundColor "Green"
         $fileContent = Get-Content -Path $Targets
         $computers = @()
 
-        foreach ($name in $fileContent) {
-            
-            # Skip empty lines or entries
-            if ([string]::IsNullOrWhiteSpace($name)) {
-                continue
-            }
+        foreach ($line in $fileContent) {
+            # Split the line by comma and trim any spaces
+            $names = $line -split ',' | ForEach-Object { $_.Trim() }
 
-            # Append domain if $name is not an FQDN
-            if ($name -notlike "*.*") {
-                $name += ".$domain"
-            }
+            foreach ($name in $names) {
+                if ([string]::IsNullOrWhiteSpace($name)) {
+                    continue
+                }
 
-            $searcher.Filter = "(dnshostname=$name)"
+                if ($name -notlike "*.*") {
+                    $name += ".$domain"
+                }
+
+                $searcher.Filter = "(dnshostname=$name)"
+                $result = $searcher.FindOne()
+
+                if ($result -ne $null) {
+                    $computers += $result.GetDirectoryEntry()
+                } else {
+                    Write-Warning "No LDAP entry found for $name"
+                }
+            }
+        }
+    }
+        else {
+            Write-Host "Processing Single Computer Name: $Targets" -ForegroundColor "Green"
+            if ($Targets -notlike "*.*") {
+                $Targets += ".$domain"
+            }
+            $searcher.Filter = "(dnshostname=$Targets)"
             $result = $searcher.FindOne()
 
             if ($result -ne $null) {
-                $computers += $result.GetDirectoryEntry()
+                $computers = @($result.GetDirectoryEntry())
             } else {
-                Write-Warning "No LDAP entry found for $name"
+                Write-Warning "No LDAP entry found for the computer: $Targets"
+                $computers = @()
             }
         }
     }
 }
 
-elseif ($Targets -match "^.+\*$|\*^.+$") {
-    # If $Targets contains valid wildcard patterns
-    $wildcardFilter = $Targets -replace "\*", "*"
-    $searcher.Filter = "(&(objectCategory=computer)(dnshostname=$wildcardFilter))"
-    $computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN" }
-}
-
-
-elseif ($Method -ne "Spray") {
-    if ($Module -eq "NTDS") {
-        if ($Targets -is [string]) {
-            if ($Targets -notlike "*.*") {
-                $Targets = $Targets + "." + $Domain
-            }
-
-            $searcher = [System.DirectoryServices.DirectorySearcher]::new()
-            $searcher.Filter = "(&(objectCategory=computer)(dnshostname=$Targets)(userAccountControl:1.2.840.113556.1.4.803:=8192)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-            $result = $searcher.FindOne()
-
-            if ($null -eq $result) {
-                Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
-                Write-Host "The provided target is not a domain controller"
-                break
-            }
-        }
-    }
-
-    $ipAddress = [System.Net.IPAddress]::TryParse($Targets, [ref]$null)
-    if ($ipAddress) {
-        Write-Host "IP Addresses not yet supported" -ForegroundColor "Red"
-        break
-    }
-
-    $searcher = [System.DirectoryServices.DirectorySearcher]::new()
-    $computers = $searcher.FindAll() | Where-Object { $_.Properties["dnshostname"][0] -in $Targets }
-    
-}
-
-
-
-}
 
 
 
