@@ -2158,8 +2158,8 @@ if (!$connected) {return "Unable to connect" }
         
         if ($Command -eq ""){
             return Invoke-Command -ComputerName $computerName -ScriptBlock  {echo "Successful Connection PME"}  -ErrorAction Stop
-        }   
-            return Invoke-Command -ComputerName $computerName -ScriptBlock {Invoke-Expression $Using:Command} -ErrorAction Stop
+        }
+        elseif ($Command -ne ""){return Invoke-Command -ComputerName $computerName -ScriptBlock {Invoke-Expression $Using:Command} -ErrorAction Stop}
         } catch {
             if ($_.Exception.Message -like "*Access is Denied*") {
                 return "Access Denied"
