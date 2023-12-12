@@ -569,29 +569,36 @@ if (!$CurrentUser -or $SprayHash) {
 ################################################################################################################
 ################################################# Function: RestoreTicket ######################################
 ################################################################################################################
-Function RestoreTicket{
-if (!$CurrentUser) {
-    
-    Write-Verbose "Restoring Ticket"
-    if ($Method -ne "GenRelayList"){
-    
-    klist purge | Out-Null
-    Start-sleep -Milliseconds 100
-    
-    klist purge | Out-Null
-    Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
-    
-    try {
-    Add-Type -AssemblyName System.DirectoryServices.AccountManagement -ErrorAction "SilentlyContinue"
-    $DomainContext = [System.DirectoryServices.ActiveDirectory.Domain]::GetDomain((New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext('Domain', $Domain)))
-    $PDC = $domainContext.PdcRoleOwner.Name
-    Write-Verbose "Creating LDAP TGS for $PDC"
-    Invoke-Rubeus "asktgs /service:LDAP/DC01.Security.local /ticket:$OriginalUserTicket /ptt" | Out-null
-} catch {}            
+Function RestoreTicket {
+    if (!$CurrentUser) {
         
+
+        if ($Klist -eq $False) {
+            Write-Verbose "Clearing tickets as no tickets in original cache"
+            klist purge | Out-Null
+            return
+        }
+
+        if ($Method -ne "GenRelayList") {
+        Write-Verbose "Restoring Ticket"
+            klist purge | Out-Null
+            Start-sleep -Milliseconds 100
+
+            klist purge | Out-Null
+            Invoke-Rubeus "ptt /ticket:$OriginalUserTicket" | Out-Null
+
+            try {
+                Add-Type -AssemblyName System.DirectoryServices.AccountManagement -ErrorAction "SilentlyContinue"
+                $DomainContext = [System.DirectoryServices.ActiveDirectory.Domain]::GetDomain((New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext('Domain', $Domain)))
+                $PDC = $domainContext.PdcRoleOwner.Name
+                Write-Verbose "Creating LDAP TGS for $PDC"
+            } catch {
+                Write-Verbose "Error creating ticket to $PDC"
+            }
         }
     }
 }
+
 
 ################################################################################################################
 ##################################### Ticket logic for authentication ##########################################
@@ -605,12 +612,17 @@ $CheckAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.Windows
 
 # If CurrentUser is not set to $True, use Rubeus to store the current user's ticket
 if (!$CurrentUser) {
+
+$Klist = -not (& klist | Select-String -Pattern "Cached Tickets: \(0\)")
+if (!$klist){Write-verbose "No Kerberos tickets in cache"}  
     
     # If the method is not RDP proceed
     if ($Method -ne "RDP") {
     if ($Method -ne "MSSQL") {
-    # If the system is domain joined, store the current user ticket into a variable to restore later
+    
     if ($DomainJoined) {
+    if ($Klist){
+        
         try {
             if ($DomainController -ne "") {
                 Invoke-Rubeus "tgtdeleg /nowrap /domain:$domain /dc:$DomainController" | Out-String
@@ -643,6 +655,8 @@ if (!$CurrentUser) {
                 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
                 Write-Host "Unable to retrieve any Kerberos tickets"
                 return
+                
+                }
             }
         }
     }
@@ -1855,9 +1869,6 @@ $runspacePool.Dispose()
 ################################################################################################################
 ############################################## Function: SMB ################################################
 ################################################################################################################
-
-
-
 Function Method-SMB{
 
 Write-host
@@ -4856,15 +4867,6 @@ function Test-SqlConnection {
     }
 }
 
-Test-SqlConnection -NamedInstance $NamedInstance
-
-
-# revert impersonation (if required)
-if ($Username -ne "" -or $Password -ne "" -and !$LocalAuth){Invoke-Impersonation  -RevertToSelf}
-}
-
-foreach ($NamedInstance in $AllInstances) {
-
     $ComputerNameFromInstance = $NamedInstance.Split('\')[0]
     try {
     $IP = $null
@@ -4872,10 +4874,18 @@ foreach ($NamedInstance in $AllInstances) {
     $IPResult = $Ping.Send($ComputerNameFromInstance, 10)
     if ($IPResult.Status -eq 'Success') {
     $IP = $IPResult.Address.IPAddressToString}
-
     }
 
     Catch {$IP = " " * 16}
+    return (Test-SqlConnection -NamedInstance $NamedInstance), $IP
+
+# revert impersonation (if required)
+if ($Username -ne "" -or $Password -ne "" -and !$LocalAuth){Invoke-Impersonation  -RevertToSelf}
+}
+
+foreach ($NamedInstance in $AllInstances) {
+
+
     
     $runspace = [powershell]::Create().AddScript($scriptBlock).AddArgument($NamedInstance).AddArgument($Username).AddArgument($Password).AddArgument($LocalAuth).AddArgument($Domain).AddArgument($Command)
     $runspace.RunspacePool = $runspacePool
@@ -4884,61 +4894,62 @@ foreach ($NamedInstance in $AllInstances) {
         Runspace = $runspace
         Handle = $runspace.BeginInvoke()
         Instance = $NamedInstance
-        IPAddress = $IP
         Completed = $false
         })
 
 }
+
 $InstanceLength = ($AllInstances | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
 
-# Poll the runspaces and display results as they complete
 do {
     foreach ($runspace in $runspaces | Where-Object { -not $_.Completed }) {
         
         if ($runspace.Handle.IsCompleted) {
             $runspace.Completed = $true
-            $result = $runspace.Runspace.EndInvoke($runspace.Handle)
+            $runspaceData = $runspace.Runspace.EndInvoke($runspace.Handle)
+            
+            $result = $runspacedata[0]
+            $IP = $runspacedata[1]
+            
             $SysAdminFilePath = Join-Path -Path $MSSQL -ChildPath ("$Username-SYSADMIN-Accessible-MSSQL-Instances.txt")
             $AccessibleFilePath = Join-Path -Path $MSSQL -ChildPath ("$Username-Accessible-MSSQL-Instances.txt")
-
+            
             if (!$Username){$Username = $env:username}
-
-
             if ($result -eq "Unable to connect"){continue}
 
             if ($result -eq "Access Denied"){
             if ($SuccessOnly){continue}
-            Display-ComputerStatus  -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NamedInstance $($runspace.Instance) -IpAddress $($runspace.IPAddress)
+            Display-ComputerStatus  -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NamedInstance $($runspace.Instance) -IpAddress $IP
             continue
             }
 
             if ($result -eq "ERROR"){
             if ($SuccessOnly){continue}
-            Display-ComputerStatus  -statusColor "Red" -statusSymbol "[-] " -statusText "ERROR - $Result" -NamedInstance $($runspace.Instance) -IpAddress $($runspace.IPAddress)
+            Display-ComputerStatus  -statusColor "Red" -statusSymbol "[-] " -statusText "ERROR - $Result" -NamedInstance $($runspace.Instance) -IpAddress $IP
             continue
             }
 
             elseif ($result -eq "Success"){
-            Display-ComputerStatus -statusColor "Green" -statusSymbol "[+] " -statusText "ACCESSIBLE INSTANCE" -NamedInstance $($runspace.Instance) -IpAddress $($runspace.IPAddress)
+            Display-ComputerStatus -statusColor "Green" -statusSymbol "[+] " -statusText "ACCESSIBLE INSTANCE" -NamedInstance $($runspace.Instance) -IpAddress $IP
             $($runspace.Instance) | Add-Content -Path "$AccessibleFilePath" -Encoding "ASCII" -Force
             continue            
             }
 
             elseif ($result -eq "SUCCESS SYSADMIN"){
-            Display-ComputerStatus -statusColor "Yellow" -statusSymbol "[+] " -statusText "SYSADMIN" -NamedInstance $($runspace.Instance) -IpAddress $($runspace.IPAddress)
+            Display-ComputerStatus -statusColor "Yellow" -statusSymbol "[+] " -statusText "SYSADMIN" -NamedInstance $($runspace.Instance) -IpAddress $IP
             $($runspace.Instance) | Add-Content -Path "$SysAdminFilePath" -Encoding "ASCII" -Force
             continue            
             }
            
             
             elseif ($result -eq "SUCCESS NOT SYSADMIN"){
-            Display-ComputerStatus -statusColor "Green" -statusSymbol "[+] " -statusText "ACCESSIBLE INSTANCE" -NamedInstance $($runspace.Instance) -IpAddress $($runspace.IPAddress)
+            Display-ComputerStatus -statusColor "Green" -statusSymbol "[+] " -statusText "ACCESSIBLE INSTANCE" -NamedInstance $($runspace.Instance) -IpAddress $IP
             $($runspace.Instance) | Add-Content -Path "$AccessibleFilePath" -Encoding "ASCII" -Force
             continue            
             }
 
             elseif ($Command -ne "" -and $Result -ne ""){
-            Display-ComputerStatus -statusColor "Yellow" -statusSymbol "[+] " -statusText "SYSADMIN" -NamedInstance $($runspace.Instance) -IpAddress $($runspace.IPAddress)
+            Display-ComputerStatus -statusColor "Yellow" -statusSymbol "[+] " -statusText "SYSADMIN" -NamedInstance $($runspace.Instance) -IpAddress $IP
             $($runspace.Instance) | Add-Content -Path "$AccessibleFilePath" -Encoding "ASCII" -Force
             Write-Output ""
             Write-output $Result
@@ -4948,12 +4959,10 @@ do {
 
             elseif ($result -like "*untrusted domain and cannot be used with Windows authentication*"){
             if ($SuccessOnly){continue}
-            Display-ComputerStatus  -statusColor "Red" -statusSymbol "[-] " -statusText "Untrusted Domain" -NamedInstance $($runspace.Instance) -IpAddress $($runspace.IPAddress)
+            Display-ComputerStatus  -statusColor "Red" -statusSymbol "[-] " -statusText "Untrusted Domain" -NamedInstance $($runspace.Instance) -IpAddress $IP
             continue
             }
 
-
-             
              # Dispose of runspace and close handle
             $runspace.Runspace.Dispose()
             $runspace.Handle.AsyncWaitHandle.Close()
