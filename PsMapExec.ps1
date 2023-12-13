@@ -161,12 +161,16 @@ $Global:TargetsAll = $null
 
 # If no targets have been provided
 if (-not $Targets -and $Method -ne "Spray") {
+    
+    Write-Host
     Write-host "[*]  " -ForegroundColor "Yellow" -NoNewline
     Write-host "You must provide a value for -targets (all, servers, DCs, Workstations)"
     return
 }
 
 if ($Targets -match "^\*+$") {
+    
+    Write-Host
     Write-host "[*]  " -ForegroundColor "Yellow" -NoNewline
     Write-Host "The target cannot consist only of asterisks. Please specify a more specific target."
     return
@@ -215,6 +219,8 @@ if ($Method -ne "") {
         "VNC" {}
 
         default {
+            
+            Write-Host
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
             Write-Host "Invalid Method specified"
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
@@ -239,6 +245,8 @@ if ($Module -ne "") {
         "Tickets" {}
 
         default {
+            
+            Write-Host
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
             Write-Host "Invalid Module specified"
             Write-Host "[*] " -ForegroundColor Yellow -NoNewline
@@ -249,6 +257,8 @@ if ($Module -ne "") {
 }
 
 if ($Module -eq "NTDS" -and ($Targets -in @("Everything", "Workstations", "all", "Servers"))) {
+    
+    Write-Host
     Write-Host "[*] " -ForegroundColor Yellow -NoNewline
     Write-Host "You must specify a single domain controller (e.g., DC01.Security.local) or 'DC', 'DCs', 'Domain Controllers' as a target when using the NTDS module"
     Write-Host "[*] " -ForegroundColor Yellow -NoNewline
@@ -258,12 +268,16 @@ if ($Module -eq "NTDS" -and ($Targets -in @("Everything", "Workstations", "all",
 
 
 if ($Threads -lt 1 -or -not [int]::TryParse($Threads, [ref]0)) {
+        
+        Write-Host
         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Threads value should not be less than 1"
         return
 }
 
 if ($Threads -gt 100) {
+        
+        Write-Host
         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Threads value should not be than 100. This will likely cause results to be missed."
         return
@@ -274,6 +288,8 @@ if ($Threads -gt 100) {
 if (!$DomainJoined){$CurrentUser = $False}
 
 if ($Domain -eq "" -and $DomainJoined -eq $False){
+    
+    Write-Host
     Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
     Write-host "This system appears to be a non-domain joined system. You must specify a target Domain ""-Domain Security.local"""
     return
@@ -288,6 +304,8 @@ if ($Method -eq "MSSQL"){$CurrentUser = $True}
 
 
 if ($Method -eq ""  -and !$SessionHunter -and !$Spray){
+        
+        Write-Host
         Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "No method specified"
         return
@@ -296,18 +314,24 @@ if ($Method -eq ""  -and !$SessionHunter -and !$Spray){
 
 if ($Method -eq "RDP") {
     if ($Hash -ne "") {
+        
+        Write-Host
         Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Hash authentication not currently supported with RDP"
         return
     }
     
     if ($Ticket -ne "") {
+        
+        Write-Host
         Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "Ticket authentication not currently supported with RDP"
         return
     }
     
     if ($Username -eq "" -or $Password -eq "") {
+        
+        Write-Host
         Write-Host "[!] " -ForegroundColor "Yellow" -NoNewline
         Write-Host "-Username and -Password parameters required when using the method RDP"
         return
@@ -318,6 +342,8 @@ if ($Method -eq "RDP") {
 if ($Method -eq "VNC") {
     if ($Username -ne "" -or $Password -ne "" -or $Hash -ne "" -or $Ticket -ne "") {
         $CurrentUser = $True
+        
+        Write-Host
         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
         Write-Host " Method VNC does not support authentication material, it simply checks if No Auth is enabled."
         Write-Host
@@ -328,6 +354,8 @@ if ($Method -eq "VNC") {
 if ($Method -eq "Spray"){
 
 if (!$EmptyPassword -and !$AccountAsPassword -and $SprayHash -eq "" -and $SprayPassword -eq ""){
+
+Write-Host
 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
 Write-Host "We need something to spray"
 Write-Host
@@ -340,6 +368,8 @@ return
 }
 
 if ($SprayHash -ne "" -and $SprayPassword -ne ""){
+
+Write-Host
 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
 Write-Host "Hash and Password detected"
 return
@@ -347,6 +377,8 @@ return
 }
 
 if ($EmptyPassword -and $SprayHash -ne "" -or ($EmptyPassword -and $SprayPassword -ne "")){
+
+Write-Host
 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
 Write-Host "Password or hash value provided with -EmptyPassword"
 return
@@ -354,6 +386,8 @@ return
 }
 
 if ($AccountAsPassword -and $SprayHash -ne "" -or ($AccountAsPassword -and $SprayPassword -ne "")){
+
+Write-Host
 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
 Write-Host "Password or hash value provided with -EmptyPassword"
 return
@@ -361,6 +395,8 @@ return
 }
 
 if ($AccountAsPassword -and $EmptyPassword){
+
+Write-Host
 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
 Write-Host "Both -AccountAsPassword and -EmptyPassword provided"
 return
@@ -369,6 +405,8 @@ return
 }
 
 if ($Method -eq "WinRM" -and !$DomainJoined){
+
+Write-Host
 Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
 Write-Host "Be aware, using WinRM from a non-domain joined system typically does not work"
 
@@ -377,6 +415,8 @@ Write-Host "This is default and expected behaviour. This system will need to be 
 }
 
 if ($Method -eq "MSSQL" -and $LocalAuth -and (($Username -eq "" -and $Password -ne "") -or ($Username -ne "" -and $Password -eq ""))) {
+    
+    Write-Host
     Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
     Write-Host "Looks like you are missing either -Username or -Password"
     Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
@@ -385,6 +425,8 @@ if ($Method -eq "MSSQL" -and $LocalAuth -and (($Username -eq "" -and $Password -
 }
 
 if ($Method -eq "MSSQL" -and !$LocalAuth -and (($Username -eq "" -and $Password -ne "") -or ($Username -ne "" -and $Password -eq ""))) {
+    
+    Write-Host
     Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
     Write-Host "Looks like you are missing either -Username or -Password"
     Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
@@ -393,6 +435,16 @@ if ($Method -eq "MSSQL" -and !$LocalAuth -and (($Username -eq "" -and $Password 
     Write-Host "You can append -LocalAuth if you wish to authenticate with a -Username and -Password as SQL Authentication"
     return
 }
+
+if ($Rainbow){
+    if ($Module -ne "Sam" -and $Module -ne "LogonPasswords" -and $Module -ne "NTDS"){
+        Write-Host
+        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+        Write-Host "The switch -Rainbow is only compatible with the Modules 'LogonPasswords', 'NTDS', and 'SAM'"
+        return
+    }
+}
+
 
 # Check if this conflicts with anything
 if ($LocalAuth){$CurrentUser = $True}
@@ -840,10 +892,10 @@ if (!$CurrentUser -or $SprayHash) {
     if (-not (Get-Command 'Invoke-Rubeus' -ErrorAction "SilentlyContinue")) {
         Write-Verbose "Loading ticket function"
         try {
-            if ($rbs) {
-                IEX $rbs
+            if ($global:rbs) {
+                IEX $global:rbs
             } else {
-                Write-Warning "Rubeus script block is null"
+                Write-Warning "rbs script block is null"
             }
         } catch {}
     } else {
@@ -891,7 +943,7 @@ Function RestoreTicket {
 # Can't remember where I was going with this...
 if ($UserDomain -ne ""){}
 
-if (!$CurrentUser){Write-verbose "Obtaining current user ticket" ; GetCurrentUserTicket}
+if (!$CurrentUser -and $Module -ne "Amnesiac"){Write-verbose "Obtaining current user ticket" ; GetCurrentUserTicket}
 if (!$CurrentUser){Write-verbose "Processing ticket" ; ProcessTicket}
 
 ################################################################################################################
@@ -5316,9 +5368,6 @@ if ($response.StatusCode -eq 200) {
         }
     }
 
-Write-Host
-Write-Host
-
 Write-host "[*] " -ForegroundColor "Yellow" -NoNewline
 Write-Host "Checking collected hashes against an online rainbow table"
 
@@ -5422,8 +5471,6 @@ function Parse-SAM {
 
     Write-Host ""
     Write-Host "------------------------------------------------------------------------------------------------" -ForegroundColor "Yellow"
-    Write-Host ""
-    Write-Host "All SAM hashes written to $PME\SAM\.Sam-Full.txt" -ForegroundColor "Yellow"
     Write-Host ""
     
     if ($Rainbow){
