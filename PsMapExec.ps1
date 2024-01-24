@@ -522,7 +522,7 @@ Version : 0.4.7")
                                     if ($Global:OriginalUserTicket -notlike "doI*") {
                                         Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
                                         Write-Host "Unable to retrieve any Kerberos tickets"
-                                        return
+                                        break
                                     }
                                 }
                                 elseif ($CheckAdmin) {
@@ -532,14 +532,14 @@ Version : 0.4.7")
                                     if ($Global:OriginalUserTicket -notlike "doI*") {
                                         Write-Host "[*] " -NoNewline -ForegroundColor "Yellow"
                                         Write-Host "Unable to retrieve any Kerberos tickets" -ForegroundColor "Red"
-                                        return
+                                        break
                                     }
                                 }
                             }
                             catch {
                                 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
                                 Write-Host "Unable to retrieve any Kerberos tickets"
-                                return
+                                break
                             }
                         }
                     }
