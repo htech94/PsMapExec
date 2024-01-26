@@ -1,96 +1,98 @@
 Function PsMapExec {
+
     [CmdletBinding(DefaultParameterSetName='Default')]
     Param(
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Command,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Targets,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Domain = "$env:USERDNSDOMAIN",
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Username,
 
-        [Parameter(Mandatory = $True, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Method,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Module,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Hash,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Password,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$UserDomain,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$LocalFileServer,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [int]$Threads = 30,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$Force,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$LocalAuth,
     
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$CurrentUser = $True,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$SuccessOnly,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$ShowOutput,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$Ticket,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [Switch]$AccountAsPassword,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [Switch]$EmptyPassword,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [int]$Port,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [Switch]$NoParse,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$SprayHash,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [String]$SprayPassword,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$NoBanner,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [string]$DomainController,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [int]$Timeout = 3000,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$Flush,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$Scramble,
 
-        [Parameter(Mandatory = $False, ValueFromPipeline = $true, ParameterSetName = 'Default')]
+        [Parameter(Mandatory = $False,  ParameterSetName = 'Default')]
         [switch]$Rainbow,
 
-        [Parameter(Mandatory = $False, ParameterSetName = 'Help')]
+        [Parameter(Mandatory = $False, ParameterSetName = 'Default')]
         [Switch]$Help
     )
+
 
     if ($Help) {
 
@@ -146,7 +148,7 @@ Documentation: https://viperone.gitbook.io/pentest-everything/psmapexec
  | -CurrentUser        |     N/A      | Defaults to current user context without other credentials      |
  | -Domain             |    Domain    | Sets the domain for the operation, defaults to user's domain    |
  | -DomainController   |      DC      | Identifies which Domain controller to authenticate against      |
- | -Force              |     N/A      | Forces execution with domain/admin credentials                  |
+ | -Force              |     N/A      | Forces execution with domain admin credentials                  |
  | -Flush              |     N/A      | Clears LDAP variables for long-term, large environments         |
  | -LocalFileServer    |      IP      | Retrieves scripts from a specified local file server IP         |
  | -Module             |    Module    | Specifies the module for command execution                      |
@@ -155,7 +157,7 @@ Documentation: https://viperone.gitbook.io/pentest-everything/psmapexec
  | -Rainbow            |     N/A      | Uses online rainbow tables for specific module hash analysis    |
  | -SuccessOnly        |     N/A      | Shows only successful results                                   |
  | -Timeout            |     int      | Sets the port scan timeout in milliseconds                      |
- | -Threads            |     int      | Determines concurrent job count, default is 30                  |
+ | -Threads            |     int      | Determines thread count, default is 30                          |
  +---------------------+--------------+-----------------------------------------------------------------+
 
  Authentication Parameters
@@ -174,7 +176,7 @@ Documentation: https://viperone.gitbook.io/pentest-everything/psmapexec
  +---------------------+--------------+-----------------------------------------------------------------+
  | -Command            |   Command    | Runs the specified command on the remote system                 |
  | -Module             |   Module     | Specifies the module for command execution                      |
- | -ShowOutput         |     N/A      | Displays output for executed modules. Commands still shown      |
+ | -ShowOutput         |     N/A      | Displays output for executed modules. Commands shown by default |
  +---------------------+--------------+-----------------------------------------------------------------+
 
  Spraying Parameters
@@ -183,22 +185,33 @@ Documentation: https://viperone.gitbook.io/pentest-everything/psmapexec
  +---------------------+--------------+-----------------------------------------------------------------+
  | -AccountAsPassword  |      N/A     | Sprays SAM Account names as passwords                           |
  | -EmptyPassword      |      N/A     | Sprays blank passwords                                          |
- | -SprayHash          | RC4/AES/NTLM | Used for hash spraying                                          |
- | -SprayPassword      |   Password   | Used for password spraying                                      |
+ | -SprayHash          | RC4/AES/NTLM | defines the hash value for spraying                             |
+ | -SprayPassword      |   Password   | defines the password value for spraying                         |
  +---------------------+--------------+-----------------------------------------------------------------+
 
 
  ---------------------------------------------- [ End Menu ] ----------------------------------------------- 
  -----------------------------------------------------------------------------------------------------------
 
-
-
-
 ")
 
-        $HelpOutput | Write-host
-        return
+    $HelpOutput | Write-Output
+    return
 
+    }
+
+    if (!$Method){
+    
+    Write-Host
+    Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+    Write-Host "You must provide a value for -Method"
+    
+    Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+    Write-Host "Run ""PsMapExec -help"" for command line usage"
+    Write-Host
+    
+    return
+    
     }
 
     $startTime = Get-Date
