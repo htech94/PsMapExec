@@ -43,7 +43,7 @@ Planned methods
 ## Usage
 ### Load the script directly into memory
 ```
-IEX(New-Object System.Net.WebClient).DownloadString("https://raw.githubusercontent.com/The-Viper-One/PsMapExec/main/PsMapExec.ps1")
+IEX(New-Object System.Net.WebClient).DownloadString("https://raw.githubusercontent.com/The-Viper-One/PsMapExec/Dev/PsMapExec.ps1")
 ```
 ### Quick examples
 ```
